@@ -1,0 +1,16 @@
+## Interface: 16001
+## Title: Rate Me!
+## Notes: Friendly player ratings, reviews, and decentralized on-demand reputation lookups for WoW Forever.
+## Author: Rate Me! Community
+## Version: 1
+## SavedVariables: RateMeDB
+
+Core.lua
+Storage.lua
+CommentSafety.lua
+Network.lua
+Alerts.lua
+Highlights.lua
+UI.lua
+PartyReview.lua
+Integration.lua
