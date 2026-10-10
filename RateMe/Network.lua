@@ -457,7 +457,9 @@ function A:HandleComment(args, sender, logged, rawMessage)
     -- Never accept an author identity carried in a comment payload or from a relay.
     local author = self:CleanName(sender)
     if not author or self:Key(vote.sender) ~= self:Key(author) then return end
-    if #args[5] == 0 or #args[5] > self.MAX_COMMENT or args[5]:find("[%c|]")
+    -- Newlines are permitted in comments; other control characters and WoW
+    -- markup delimiters are not. They remain authenticated to the logged sender.
+    if #args[5] == 0 or #args[5] > self.MAX_COMMENT or args[5]:find("[|%z\1-\9\11-\31\127]")
         or type(rawMessage) ~= "string" then return end
     local safeComment = self:SanitizeComment(args[5])
     if safeComment == "" then return end

@@ -3,6 +3,17 @@ local GOLD = {1, 0.72, 0.28}
 local WHITE = {0.93, 0.91, 0.86}
 local MUTED = {0.60, 0.64, 0.70}
 
+-- One set of coordinates for both list headings and their row contents.
+-- Headers are positioned on the main window, while rows are relative to the
+-- scrolling content, which begins LIST_VIEWPORT_X pixels from the left edge.
+local LIST_VIEWPORT_X = 29
+local LIST_PAGE_SIZE = 20
+local LIST_COLUMNS = {
+    player = {x = 8, width = 235},
+    rating = {x = 253, width = 157},
+    date = {x = 418, width = 237},
+}
+
 local function makeFrame(name, width, height)
     local f = CreateFrame("Frame", name, UIParent, "BackdropTemplate")
     f:SetSize(width, height)
@@ -125,9 +136,12 @@ local function button(parent, text, width, height, x, y, onClick)
     return b
 end
 
-function A:DateText(timestamp)
+-- Stored timestamps are UTC-based Unix epoch seconds. WoW's date() uses
+-- the player's local client timezone unless the format starts with "!".
+-- Keep the conversion at display time, never in SavedVariables or packets.
+function A:DateText(timestamp, includeSeconds)
     if type(timestamp) ~= "number" or timestamp <= 0 then return "Unknown" end
-    return date("%Y-%m-%d", timestamp)
+    return date(includeSeconds and "%Y-%m-%d %I:%M:%S %p" or "%Y-%m-%d %I:%M %p", timestamp)
 end
 -- Window-only presentation: 5 textures (empty/half/full to the closest 0.5),
 -- followed immediately by the actual average rounded independently to 0.1.
@@ -176,53 +190,128 @@ end
 
 function A:CreateMainWindow()
     local f = makeFrame("RateMeMainWindow", 770, 565)
-    label(f, "GameFontNormalLarge", "Rate Me!", 26, -24)
-    label(f, "GameFontDisableSmall", "Player reputation", 145, -29)
+    -- Keep the title and navigation in one header row. The close button
+    -- occupies the far right, so the three tabs end before its hit area.
+    -- Both text fields use the same left edge AND LEFT justification. The
+    -- default centred justification on different widths shifted the tagline.
+    f.title = label(f, "GameFontNormalLarge", "Rate Me!", 26, -24, 160, "LEFT")
+    f.tagline = label(f, "GameFontDisableSmall", "Reputation earned. Reputation shared.", 26, -51, 325, "LEFT")
     f.tab = "mine"
-    f.tabMine = button(f, "My Ratings", 145, 27, 26, -58, function()
-        f.tab = "mine"; A:DrawMain()
+    f.pages = {mine = 1, recent = 1}
+    f.tabMine = button(f, "My Ratings", 107, 27, 370, -19, function()
+        f.tab = "mine"; f.selected = nil; A:DrawMain()
     end)
-    f.tabRecent = button(f, "Recent Lookups", 145, 27, 177, -58, function()
-        f.tab = "recent"; A:DrawMain()
+    f.tabRecent = button(f, "Recent Lookups", 132, 27, 482, -19, function()
+        f.tab = "recent"; f.selected = nil; A:DrawMain()
     end)
-    f.tabSettings = button(f, "Settings", 145, 27, 328, -58, function()
-        f.tab = "settings"; A:DrawMain()
+    f.tabSettings = button(f, "Settings", 98, 27, 619, -19, function()
+        f.tab = "settings"; f.selected = nil; A:DrawMain()
     end)
-    f.searchLabel = label(f, "GameFontNormalSmall", "Search:", 30, -102)
+    -- Keep the title/navigation, list, and pagination/search visually distinct
+    -- without adding extra headers or taking space away from the scroll area.
+    -- Plain colour textures are supported by Forever's client and scale with
+    -- the window, unlike fixed-width decorative character glyphs.
+    local function divider(y)
+        local line = f:CreateTexture(nil, "ARTWORK")
+        line:SetHeight(1)
+        line:SetColorTexture(0.30, 0.35, 0.43, 0.9)
+        line:SetPoint("TOPLEFT", f, "TOPLEFT", 29, y)
+        line:SetPoint("TOPRIGHT", f, "TOPRIGHT", -29, y)
+        return line
+    end
+    f.headerDivider = divider(-81)
+    -- A fine line also fixes the column headings visually above scrolling rows.
+    f.listHeadingDivider = f:CreateTexture(nil, "ARTWORK")
+    f.listHeadingDivider:SetHeight(1)
+    f.listHeadingDivider:SetColorTexture(0.30, 0.35, 0.43, 0.55)
+    f.listHeadingDivider:SetPoint("TOPLEFT", f, "TOPLEFT", LIST_VIEWPORT_X, -117)
+    f.listHeadingDivider:SetPoint("TOPRIGHT", f, "TOPRIGHT", -50, -117)
+    -- Pagination belongs to the results area. Put the divider *below* its
+    -- controls, then use the darker footer only for Search and Clear.
+    f.footerBackground = f:CreateTexture(nil, "BACKGROUND", nil, -7)
+    f.footerBackground:SetColorTexture(0.038, 0.045, 0.065, 1)
+    f.footerBackground:SetPoint("TOPLEFT", f, "TOPLEFT", 25, -506)
+    f.footerBackground:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -25, 12)
+    f.footerDivider = divider(-506)
+    -- Search is the only footer control. All Characters lives in Settings,
+    -- and lookup refresh remains in the selected player's drilldown window.
+    -- Player counts sit right-aligned on the same row as the pager instead of
+    -- floating in the blank space above the column headings.
+    f.status = label(f, "GameFontDisableSmall", "", 588, -477, 153, "RIGHT")
+    f.searchLabel = label(f, "GameFontNormalSmall", "Search:", 29, -526)
     f.search = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    f.search:SetSize(230, 23)
-    f.search:SetPoint("TOPLEFT", 85, -94)
+    f.search:SetSize(400, 23)
+    f.search:SetPoint("TOPLEFT", 72, -520)
+    -- InputBoxTemplate draws a frame *outside* the EditBox bounds. Position
+    -- the label against the visible border, not against its hidden frame edge.
+    -- Vertical adjustments account for the small-font glyph's visible centre.
+    f.searchLabel:ClearAllPoints()
+    f.searchLabel:SetPoint("RIGHT", f.search, "LEFT", -13, 1)
+    f.searchLabel:SetJustifyH("RIGHT")
     f.search:SetAutoFocus(false)
     f.search:SetMaxLetters(70)
-    f.search:SetScript("OnTextChanged", function() A:DrawMain() end)
+    f.search:SetScript("OnTextChanged", function(self)
+        f.pages.mine, f.pages.recent = 1, 1
+        f.selected = nil
+        if f.clearSearch then
+            local text = self:GetText() or ""
+            f.clearSearch:SetEnabled(text ~= "")
+        end
+        A:DrawMain()
+    end)
     f.search:SetScript("OnEscapePressed", function(self)
         self:ClearFocus()
         A:CloseTopWindow()
     end)
-    f.status = label(f, "GameFontDisableSmall", "", 435, -103, 295, "RIGHT")
+    f.clearSearch = button(f, "X", 24, 24, 478, -518, function()
+        if not f.search then return end
+        f.search:SetText("")
+        f.search:ClearFocus()
+        f.selected = nil
+        A:DrawMain()
+    end)
+    -- Match the actual visual centre of the rendered input border; the button
+    -- texture has slightly uneven top/bottom padding of its own.
+    f.clearSearch:ClearAllPoints()
+    f.clearSearch:SetPoint("LEFT", f.search, "RIGHT", 6, -1)
+    f.clearSearch:SetEnabled(false)
     -- Static column headings only: date-descending is now the sole sort order.
-    f.playerHeading = label(f, "GameFontNormalSmall", "Player", 30, -135, 213, "RIGHT")
-    f.ratingHeading = label(f, "GameFontNormalSmall", "Rating", 253, -135, 157, "RIGHT")
-    f.dateHeading = label(f, "GameFontNormalSmall", "Date rated", 418, -135, 237, "RIGHT")
+    -- Align heading boundaries exactly with the text bounds of each row.
+    f.playerHeading = label(f, "GameFontNormalSmall", "Player",
+        LIST_VIEWPORT_X + LIST_COLUMNS.player.x, -97, LIST_COLUMNS.player.width, "RIGHT")
+    f.ratingHeading = label(f, "GameFontNormalSmall", "Rating",
+        LIST_VIEWPORT_X + LIST_COLUMNS.rating.x, -97, LIST_COLUMNS.rating.width, "RIGHT")
+    f.dateHeading = label(f, "GameFontNormalSmall", "Date rated",
+        LIST_VIEWPORT_X + LIST_COLUMNS.date.x, -97, LIST_COLUMNS.date.width, "RIGHT")
     f.scroller = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-    f.scroller:SetPoint("TOPLEFT", 29, -164)
-    f.scroller:SetPoint("BOTTOMRIGHT", -50, 66)
+    f.scroller:SetPoint("TOPLEFT", LIST_VIEWPORT_X, -126)
+    -- Reserve space for the pager and Search/action footer beneath it.
+    f.scroller:SetPoint("BOTTOMRIGHT", -50, 108)
     f.content = CreateFrame("Frame", nil, f.scroller)
     f.content:SetSize(675, 1)
     f.scroller:SetScrollChild(f.content)
+    f.scroller:SetScript("OnSizeChanged", function(scroll, width)
+        if type(width) == "number" and width > 0 and f.content then
+            f.content:SetWidth(math.max(675, width - 4))
+        end
+    end)
     f.rows = {}
-    f.allCharacters = button(f, "Show all my characters", 190, 25, 27, -522, function()
-        A.db.settings.allCharacters = not A.db.settings.allCharacters
+    f.previousPage = button(f, "Previous", 95, 24, 244, -471, function()
+        if f.tab ~= "mine" and f.tab ~= "recent" then return end
+        local page = f.pages[f.tab] or 1
+        if page <= 1 then return end
+        f.pages[f.tab] = page - 1
+        f.selected = nil
         A:DrawMain()
     end)
-    f.refresh = button(f, "Refresh Selected Target", 170, 25, 567, -522, function()
-        if f.selected then
-            local target = A.db.recent[f.selected]
-            if target then
-                A:Query(target, true)
-                A:Log("Requested current ratings for " .. A:DisplayName(target.name))
-            end
-        end
+    f.pageIndicator = label(f, "GameFontHighlightSmall", "Page 1 of 1", 349, -477, 123, "CENTER")
+    f.nextPage = button(f, "Next", 95, 24, 484, -471, function()
+        if f.tab ~= "mine" and f.tab ~= "recent" then return end
+        local page = f.pages[f.tab] or 1
+        if page >= (f.pageCounts and f.pageCounts[f.tab] or 1) then return end
+        f.pages[f.tab] = page + 1
+        f.selected = nil
+        A:DrawMain()
     end)
     f:SetScript("OnShow", function()
         A:MarkWindowShown(f)
@@ -232,104 +321,193 @@ function A:CreateMainWindow()
     self.main = f
 end
 
+-- Settings use opaque, self-contained sections. Dependent controls are inset
+-- under their master switch; checkbox labels explain each option.
+-- The preference keys and change handlers are unchanged (SavedVariables v1).
 function A:CreateSettingsPanel()
     local scroll = CreateFrame("ScrollFrame", nil, self.main, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", self.main, "TOPLEFT", 29, -97)
     scroll:SetPoint("BOTTOMRIGHT", self.main, "BOTTOMRIGHT", -38, 50)
+    -- Keep the content just inside the scroll viewport, rather than the old
+    -- hard-coded 665/640 widths that left a large unused strip on the right.
+    -- Match future size changes (including UI-scale changes) automatically.
     local p = CreateFrame("Frame", nil, scroll)
-    p:SetSize(675, 1210)
+    p:SetSize(699, 1175) -- six responsive sections, including My Ratings preferences
     scroll:SetScrollChild(p)
-
-    local function checkbox(key, title, y, onClick)
-        local c = CreateFrame("CheckButton", nil, p, "UICheckButtonTemplate")
-        c:SetSize(30, 30)
-        c:SetPoint("TOPLEFT", p, "TOPLEFT", 8, -y)
-        label(p, "GameFontHighlight", title, 44, -(y + 7), 590)
-        c:SetScript("OnClick", function(self)
-            A.db.settings[key] = self:GetChecked() and true or false
-            onClick()
-            A:DrawSettings()
-        end)
-        return c
+    scroll.content = p
+    scroll:SetScript("OnSizeChanged", function(_, width)
+        if type(width) == "number" and width > 0 then
+            p:SetWidth(math.max(400, width - 4))
+        end
+    end)
+    if scroll.GetWidth then
+        local width = scroll:GetWidth()
+        if type(width) == "number" and width > 0 then
+            p:SetWidth(math.max(400, width - 4))
+        end
     end
-    local function threshold(name, key, y)
-        local slider = CreateFrame("Slider", name, p, "OptionsSliderTemplate")
-        slider:SetPoint("TOPLEFT", p, "TOPLEFT", 35, -y)
-        slider:SetSize(335, 19)
+
+    local function section(y, height, title)
+        local card = CreateFrame("Frame", nil, p, "BackdropTemplate")
+        card:SetHeight(height)
+        -- Two horizontal anchors make each panel fill the available content width
+        -- with matching 8px gutters, without running under the scrollbar.
+        card:SetPoint("TOPLEFT", p, "TOPLEFT", 8, -y)
+        card:SetPoint("TOPRIGHT", p, "TOPRIGHT", -8, -y)
+        card:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1,
+            insets = { left = 1, right = 1, top = 1, bottom = 1 } })
+        card:SetBackdropColor(0.11, 0.13, 0.18, 1)
+        card:SetBackdropBorderColor(0.28, 0.33, 0.41, 1)
+        -- A previous 3px gold accent rendered as a stray glyph beside headings
+        -- on Forever. Keep the gold heading without that decorative bar.
+        local titleText = label(card, "GameFontNormalLarge", title, 20, -12)
+        titleText:SetTextColor(unpack(GOLD))
+        return card
+    end
+
+    local function rule(card, y)
+        local tex = card:CreateTexture(nil, "ARTWORK")
+        tex:SetColorTexture(0.31, 0.36, 0.44, 1)
+        tex:SetHeight(1)
+        tex:SetPoint("TOPLEFT", card, "TOPLEFT", 20, -y)
+        tex:SetPoint("TOPRIGHT", card, "TOPRIGHT", -20, -y)
+        return tex
+    end
+
+    local function checkbox(card, key, title, x, y, onClick)
+        local row = CreateFrame("Button", nil, card)
+        row:SetSize(520 - x, 30)
+        row:SetPoint("TOPLEFT", card, "TOPLEFT", x, -y)
+        local c = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+        c:SetSize(30, 30)
+        c:SetPoint("LEFT", row, "LEFT", 0, 0)
+        local caption = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        caption:SetPoint("LEFT", c, "RIGHT", 6, 0)
+        caption:SetText(title)
+        caption:SetJustifyH("LEFT")
+        -- Keep labels wide enough for their self-explanatory wording.
+        local textWidth = caption.GetStringWidth and caption:GetStringWidth() or (#title * 7)
+        caption:SetWidth(math.min(480 - x, math.ceil(textWidth + 5)))
+        local function changed(self)
+            A.db.settings[key] = self:GetChecked() and true or false
+            if onClick then onClick() end
+            A:DrawSettings()
+        end
+        c:SetScript("OnClick", changed)
+        row:SetScript("OnClick", function() c:SetChecked(not c:GetChecked()); changed(c) end)
+        return c, row, caption
+    end
+
+    local function threshold(card, name, key, text, y)
+        local heading = label(card, "GameFontHighlightSmall", text, 79, -y, 355)
+        local value = label(card, "GameFontNormal", "", 460, -(y + 18), 151, "RIGHT")
+        local slider = CreateFrame("Slider", name, card, "OptionsSliderTemplate")
+        slider:SetPoint("TOPLEFT", card, "TOPLEFT", 85, -(y + 29))
+        slider:SetSize(340, 19)
         slider:SetMinMaxValues(1, 5)
         slider:SetValueStep(0.5)
         if slider.SetObeyStepOnDrag then slider:SetObeyStepOnDrag(true) end
         local base = slider:GetName()
-        if _G[base .. "Low"] then _G[base .. "Low"]:SetText("1.0") end
-        if _G[base .. "High"] then _G[base .. "High"]:SetText("5.0") end
-        if _G[base .. "Text"] then _G[base .. "Text"]:SetText("") end
+        if base then
+            if _G[base .. "Low"] then _G[base .. "Low"]:SetText("1.0") end
+            if _G[base .. "High"] then _G[base .. "High"]:SetText("5.0") end
+            if _G[base .. "Text"] then _G[base .. "Text"]:SetText("") end
+        end
         slider:SetValue(A.db.settings[key])
-        slider:SetScript("OnValueChanged", function(self, value)
-            local rounded = math.max(1, math.min(5, math.floor(value * 2 + 0.5) / 2))
-            if math.abs(value - rounded) > 0.001 then self:SetValue(rounded); return end
+        slider:SetScript("OnValueChanged", function(self, number)
+            local rounded = math.max(1, math.min(5, math.floor(number * 2 + 0.5) / 2))
+            if math.abs(number - rounded) > 0.001 then self:SetValue(rounded); return end
             if A.db.settings[key] ~= rounded then
                 A.db.settings[key] = rounded
                 A:OnAlertSettingsChanged()
             end
             A:DrawSettings()
         end)
-        return slider
+        return slider, value, heading
     end
 
-    label(p, "GameFontNormalLarge", "Group Rating Alerts", 10, -12)
-    label(p, "GameFontHighlightSmall", "Warn about low-rated players joining your party or raid.", 10, -42, 650)
-    p.enabled = checkbox("lowRatingAlerts", "Enable group join warnings", 75, function() A:OnAlertSettingsChanged() end)
-    p.alertPersonal = checkbox("lowRatingPersonal", "Use my personal ratings", 111, function() A:OnAlertSettingsChanged() end)
-    p.alertCommunity = checkbox("lowRatingCommunity", "Use community ratings", 148, function() A:OnAlertSettingsChanged() end)
+    local myRatings = section(12, 90, "My Ratings")
+    p.allCharacters, p.allCharactersRow, p.allCharactersLabel = checkbox(myRatings,
+        "allCharacters", "Show ratings from all my characters in My Ratings", 19, 51,
+        function()
+            -- This changes only which saved personal records are shown.
+            -- Keep per-character authorship and existing records untouched.
+            self.main.pages.mine = 1
+            self.main.selected = nil
+        end)
 
-    label(p, "GameFontNormal", "Personal rating warning threshold", 15, -193)
-    p.personalThreshold = threshold("RateMePersonalAlertThresholdSlider", "lowRatingPersonalThreshold", 231)
-    p.personalThresholdValue = label(p, "GameFontHighlight", "", 421, -228, 220)
-    label(p, "GameFontNormal", "Community rating warning threshold", 15, -280)
-    p.threshold = threshold("RateMeAlertThresholdSlider", "lowRatingThreshold", 318)
-    p.thresholdValue = label(p, "GameFontHighlight", "", 421, -315, 220)
-    p.explanation = label(p, "GameFontHighlightSmall", "", 15, -366, 650)
-    p.explanation:SetJustifyV("TOP")
-    p.explanation:SetHeight(54)
+    local alerts = section(121, 345, "Group Rating Alerts")
+    p.enabled, p.enabledRow, p.enabledLabel = checkbox(alerts, "lowRatingAlerts",
+        "Show a warning when a low-rated player joins my group", 19, 51,
+        function() A:OnAlertSettingsChanged() end)
+    rule(alerts, 91)
+    p.alertPersonal, p.alertPersonalRow, p.alertPersonalLabel = checkbox(alerts, "lowRatingPersonal",
+        "Check ratings I personally gave players", 43, 103,
+        function() A:OnAlertSettingsChanged() end)
+    p.personalThreshold, p.personalThresholdValue, p.personalThresholdLabel = threshold(alerts,
+        "RateMePersonalAlertThresholdSlider", "lowRatingPersonalThreshold",
+        "Warn if my rating is at or below", 141)
+    p.alertCommunity, p.alertCommunityRow, p.alertCommunityLabel = checkbox(alerts, "lowRatingCommunity",
+        "Check recent verified community ratings", 43, 225,
+        function() A:OnAlertSettingsChanged() end)
+    p.threshold, p.thresholdValue, p.thresholdLabel = threshold(alerts,
+        "RateMeAlertThresholdSlider", "lowRatingThreshold",
+        "Warn if community rating is at or below", 263)
 
-    label(p, "GameFontNormalLarge", "Player Rating Highlights", 10, -438)
-    p.highlights = checkbox("ratingHighlights", "Highlight rated friendly players", 470,
+    local highlights = section(485, 288, "Player Rating Highlights")
+    p.highlights, p.highlightsRow, p.highlightsLabel = checkbox(highlights, "ratingHighlights",
+        "Enable rating indicators for friendly players", 19, 51,
         function() A:OnHighlightSettingsChanged() end)
-    p.highlightPersonal = checkbox("ratingHighlightsPersonal", "Use my personal ratings", 508,
+    rule(highlights, 89)
+    p.highlightGlow, p.highlightGlowRow, p.highlightGlowLabel = checkbox(highlights,
+        "ratingHighlightsGlow", "Show gold/red glows on player frames", 43, 100,
         function() A:OnHighlightSettingsChanged() end)
-    p.highlightCommunity = checkbox("ratingHighlightsCommunity", "Use community ratings", 545,
+    p.highlightBadge, p.highlightBadgeRow, p.highlightBadgeLabel = checkbox(highlights,
+        "ratingHighlightsBadge", "Show a star with the numeric rating beside nameplates", 43, 135,
         function() A:OnHighlightSettingsChanged() end)
-    p.highlightExplanation = label(p, "GameFontHighlightSmall", "", 15, -590, 650)
-    p.highlightExplanation:SetJustifyV("TOP")
-    p.highlightExplanation:SetHeight(64)
+    rule(highlights, 172)
+    p.highlightPersonal, p.highlightPersonalRow, p.highlightPersonalLabel = checkbox(highlights,
+        "ratingHighlightsPersonal", "Use ratings I personally gave players", 43, 182,
+        function() A:OnHighlightSettingsChanged() end)
+    p.highlightCommunity, p.highlightCommunityRow, p.highlightCommunityLabel = checkbox(highlights,
+        "ratingHighlightsCommunity", "Use recent verified community ratings", 43, 217,
+        function() A:OnHighlightSettingsChanged() end)
+    local legend = label(highlights, "GameFontHighlightSmall",
+        "Badge: community first, then personal.  Gold: 4.0+   Red: below 2.0", 47, -261, 610)
+    legend:SetTextColor(unpack(MUTED))
 
-    label(p, "GameFontNormalLarge", "Minimap Button", 10, -682)
-    p.minimapVisible = checkbox("minimapVisible", "Show Rate Me! minimap button", 713,
-        function() A:SetMinimapVisible(A.db.settings.minimapVisible) end)
-    label(p, "GameFontHighlightSmall", "Left-click to open. Left-drag to reposition. /rateme always opens the window.", 15, -753, 650)
-
-    label(p, "GameFontNormalLarge", "Post-Party Ratings", 10, -811)
-    p.partyReviewPrompt = checkbox("partyReviewPrompt", "Offer to rate party members when I leave a party", 841,
+    local party = section(792, 109, "Post-Party Ratings")
+    p.partyReviewPrompt, p.partyReviewPromptRow, p.partyReviewPromptLabel = checkbox(party,
+        "partyReviewPrompt", "Open the party rating popup when I leave a party", 19, 51,
         function() if not A.db.settings.partyReviewPrompt then A.pendingPartyReview = nil end end)
-    label(p, "GameFontHighlightSmall",
-        "Party only, not raids. Includes friendly players encountered during the party. " ..
-        "Use /rateme party to reopen the most recent party.", 15, -885, 640)
+    local partyHint = label(party, "GameFontHighlightSmall",
+        "Dismiss with Escape. Reopen the last party with /rateme party.", 55, -84, 545)
+    partyHint:SetTextColor(unpack(MUTED))
 
-    label(p, "GameFontNormalLarge", "Comment Safety", 10, -959)
-    p.hideCommentsByDefault = checkbox("hideCommentsByDefault", "Hide written reviews by default", 989, function()
-        A.revealedReviews = {} -- new preference applies to all current review rows
-        if A.reviews and A.reviews:IsShown() then A:DrawReviews() end
-    end)
-    label(p, "GameFontHighlightSmall",
-        "Written reviews are not profanity-filtered. Use Show/Hide per review, " ..
-        "Block to hide a reviewer's comments, or Report for Blizzard support instructions. " ..
-        "Comments are sent through logged addon messaging.", 15, -1030, 645)
+    local comments = section(920, 109, "Comment Safety")
+    p.hideCommentsByDefault, p.hideCommentsByDefaultRow, p.hideCommentsByDefaultLabel = checkbox(comments,
+        "hideCommentsByDefault", "Keep reviews hidden until I choose to show them", 19, 51, function()
+            A.revealedReviews = {}
+            if A.reviews and A.reviews:IsShown() then A:DrawReviews() end
+        end)
+    local commentHint = label(comments, "GameFontHighlightSmall",
+        "Show/Hide, Block and Report controls are available per review.", 55, -85, 545)
+    commentHint:SetTextColor(unpack(MUTED))
 
-    -- Existing callers access controls via the scroll frame, not its child.
+    local minimap = section(1048, 109, "Minimap Button")
+    p.minimapVisible, p.minimapVisibleRow, p.minimapVisibleLabel = checkbox(minimap,
+        "minimapVisible", "Show the movable Rate Me! button on my minimap", 19, 51,
+        function() A:SetMinimapVisible(A.db.settings.minimapVisible) end)
+    local miniHint = label(minimap, "GameFontHighlightSmall",
+        "Left-click: open     Left-drag: move     /rateme: always available", 55, -84, 545)
+    miniHint:SetTextColor(unpack(MUTED))
+
+    -- Preserve original controls/aliases for any current callers or testing.
     for _, name in ipairs({"enabled", "alertPersonal", "alertCommunity", "threshold", "thresholdValue",
-        "personalThreshold", "personalThresholdValue", "explanation", "highlights", "highlightPersonal",
-        "highlightCommunity", "highlightExplanation", "minimapVisible", "partyReviewPrompt",
-        "hideCommentsByDefault"}) do
+        "personalThreshold", "personalThresholdValue", "highlights", "highlightGlow", "highlightBadge",
+        "highlightPersonal", "highlightCommunity", "minimapVisible", "partyReviewPrompt", "hideCommentsByDefault",
+        "allCharacters"}) do
         scroll[name] = p[name]
     end
     self.main.settingsPanel = scroll
@@ -339,23 +517,45 @@ end
 function A:DrawSettings()
     local f = self.main
     if not f or not f.settingsPanel then return end
-    local p = f.settingsPanel
+    local p = f.settingsPanel.content
     local settings = self.db.settings
+    p.allCharacters:SetChecked(settings.allCharacters)
     p.enabled:SetChecked(settings.lowRatingAlerts)
     p.alertPersonal:SetChecked(settings.lowRatingPersonal)
     p.alertCommunity:SetChecked(settings.lowRatingCommunity)
     p.highlights:SetChecked(settings.ratingHighlights)
+    p.highlightGlow:SetChecked(settings.ratingHighlightsGlow)
+    p.highlightBadge:SetChecked(settings.ratingHighlightsBadge)
     p.highlightPersonal:SetChecked(settings.ratingHighlightsPersonal)
     p.highlightCommunity:SetChecked(settings.ratingHighlightsCommunity)
     p.minimapVisible:SetChecked(settings.minimapVisible)
     p.partyReviewPrompt:SetChecked(settings.partyReviewPrompt)
     p.hideCommentsByDefault:SetChecked(settings.hideCommentsByDefault)
-    p.alertPersonal:SetEnabled(settings.lowRatingAlerts)
-    p.alertCommunity:SetEnabled(settings.lowRatingAlerts)
-    p.threshold:SetEnabled(settings.lowRatingAlerts and settings.lowRatingCommunity)
-    p.personalThreshold:SetEnabled(settings.lowRatingAlerts and settings.lowRatingPersonal)
-    p.highlightPersonal:SetEnabled(settings.ratingHighlights)
-    p.highlightCommunity:SetEnabled(settings.ratingHighlights)
+
+    local function dependent(control, row, caption, isEnabled)
+        control:SetEnabled(isEnabled)
+        row:SetEnabled(isEnabled)
+        caption:SetTextColor(isEnabled and 0.93 or 0.53,
+            isEnabled and 0.91 or 0.56, isEnabled and 0.86 or 0.60)
+    end
+    dependent(p.alertPersonal, p.alertPersonalRow, p.alertPersonalLabel, settings.lowRatingAlerts)
+    dependent(p.alertCommunity, p.alertCommunityRow, p.alertCommunityLabel, settings.lowRatingAlerts)
+    dependent(p.highlightGlow, p.highlightGlowRow, p.highlightGlowLabel, settings.ratingHighlights)
+    dependent(p.highlightBadge, p.highlightBadgeRow, p.highlightBadgeLabel, settings.ratingHighlights)
+    local anyVisual = settings.ratingHighlights and
+        (settings.ratingHighlightsGlow or settings.ratingHighlightsBadge)
+    dependent(p.highlightPersonal, p.highlightPersonalRow, p.highlightPersonalLabel, anyVisual)
+    dependent(p.highlightCommunity, p.highlightCommunityRow, p.highlightCommunityLabel, anyVisual)
+    local personalEnabled = settings.lowRatingAlerts and settings.lowRatingPersonal
+    local communityEnabled = settings.lowRatingAlerts and settings.lowRatingCommunity
+    p.personalThreshold:SetEnabled(personalEnabled)
+    p.threshold:SetEnabled(communityEnabled)
+    p.personalThreshold:SetAlpha(personalEnabled and 1 or 0.42)
+    p.threshold:SetAlpha(communityEnabled and 1 or 0.42)
+    p.personalThresholdLabel:SetTextColor(personalEnabled and 0.93 or 0.53,
+        personalEnabled and 0.91 or 0.56, personalEnabled and 0.86 or 0.60)
+    p.thresholdLabel:SetTextColor(communityEnabled and 0.93 or 0.53,
+        communityEnabled and 0.91 or 0.56, communityEnabled and 0.86 or 0.60)
     if math.abs(p.threshold:GetValue() - settings.lowRatingThreshold) > 0.001 then
         p.threshold:SetValue(settings.lowRatingThreshold)
     end
@@ -364,27 +564,29 @@ function A:DrawSettings()
     end
     p.thresholdValue:SetText(string.format("%.1f stars or lower", settings.lowRatingThreshold))
     p.personalThresholdValue:SetText(string.format("%.1f stars or lower", settings.lowRatingPersonalThreshold))
-    p.explanation:SetText("Select either or both rating sources. Personal ratings work offline; " ..
-        "community ratings need a fresh verified online sample. If either score " ..
-        "meets its threshold, show one group warning per player until they leave.")
-    p.highlightExplanation:SetText("Gold: 4.0+; red: below 2.0; no glow for 2.0-3.9. " ..
-        "Select either or both sources. Red wins if both conflict. " ..
-        "Community glows require fresh ratings; personal glows work offline. " ..
-        "Visible friendly nameplates outdoors and supported group frames.")
+    p.thresholdValue:SetTextColor(communityEnabled and 0.93 or 0.53,
+        communityEnabled and 0.91 or 0.56, communityEnabled and 0.86 or 0.60)
+    p.personalThresholdValue:SetTextColor(personalEnabled and 0.93 or 0.53,
+        personalEnabled and 0.91 or 0.56, personalEnabled and 0.86 or 0.60)
 end
 
 function A:CreateMainRow(index)
     local f = self.main
     local b = CreateFrame("Button", nil, f.content)
-    b:SetSize(675, 38)
+    b:SetHeight(38)
     b:SetPoint("TOPLEFT", f.content, "TOPLEFT", 0, -(index - 1) * 40)
+    b:SetPoint("TOPRIGHT", f.content, "TOPRIGHT", 0, -(index - 1) * 40)
     local tex = b:CreateTexture(nil, "BACKGROUND")
     tex:SetAllPoints()
     tex:SetColorTexture(0.19, 0.23, 0.30, index % 2 == 0 and 0.4 or 0.2)
-    b.nameText = label(b, "GameFontHighlight", "", 8, -7, 235, "RIGHT")
-    b.subText = label(b, "GameFontDisableSmall", "", 8, -23, 235, "RIGHT")
-    b.scoreText = label(b, "GameFontNormal", "", 253, -12, 157, "RIGHT")
-    b.dateText = label(b, "GameFontHighlightSmall", "", 418, -12, 237, "RIGHT")
+    b.nameText = label(b, "GameFontHighlight", "",
+        LIST_COLUMNS.player.x, -7, LIST_COLUMNS.player.width, "RIGHT")
+    b.subText = label(b, "GameFontDisableSmall", "",
+        LIST_COLUMNS.player.x, -23, LIST_COLUMNS.player.width, "RIGHT")
+    b.scoreText = label(b, "GameFontNormal", "",
+        LIST_COLUMNS.rating.x, -12, LIST_COLUMNS.rating.width, "RIGHT")
+    b.dateText = label(b, "GameFontHighlightSmall", "",
+        LIST_COLUMNS.date.x, -12, LIST_COLUMNS.date.width, "RIGHT")
     b:SetScript("OnClick", function(self)
         local item = self.record
         if not item then return end
@@ -412,18 +614,32 @@ function A:DrawMain()
     f.tabSettings:SetEnabled(f.tab ~= "settings")
     local isSettings = f.tab == "settings"
     f.settingsPanel:SetShown(isSettings)
+    -- Settings has its own cards, not a list/pager/footer; keep the common
+    -- header rule but hide every list-only separator and footer texture.
+    f.listHeadingDivider:SetShown(not isSettings)
+    f.footerBackground:SetShown(not isSettings)
+    f.footerDivider:SetShown(not isSettings)
     f.searchLabel:SetShown(not isSettings)
     f.search:SetShown(not isSettings)
+    f.clearSearch:SetShown(not isSettings)
     f.status:SetShown(not isSettings)
     f.scroller:SetShown(not isSettings)
     f.playerHeading:SetShown(not isSettings)
     f.ratingHeading:SetShown(not isSettings)
     f.dateHeading:SetShown(not isSettings)
+    f.previousPage:SetShown(not isSettings)
+    f.pageIndicator:SetShown(not isSettings)
+    f.nextPage:SetShown(not isSettings)
     f.dateHeading:SetText(f.tab == "recent" and "Last checked" or "Date rated")
-    f.allCharacters:SetText(self.db.settings.allCharacters and "All characters: ON" or "All characters: OFF")
-    f.allCharacters:SetShown(f.tab == "mine")
-    f.refresh:SetShown(f.tab == "recent")
+    f.clearSearch:SetEnabled((f.search:GetText() or "") ~= "")
     if isSettings then self:DrawSettings(); return end
+
+    if f.scroller and f.scroller.GetWidth and f.content then
+        local width = f.scroller:GetWidth()
+        if type(width) == "number" and width > 0 then
+            f.content:SetWidth(math.max(675, width - 4))
+        end
+    end
     local records = f.tab == "mine" and self:ListOwn() or self:ListRecent()
     local filter = f.search:GetText():lower()
     local items = {}
@@ -433,9 +649,34 @@ function A:DrawMain()
             items[#items + 1] = record
         end
     end
+    -- Search the entire list and sort BEFORE applying pagination.
     sortItems(items, f.tab == "recent")
-    f.status:SetText(tostring(#items) .. " player" .. (#items == 1 and "" or "s"))
-    for index, item in ipairs(items) do
+    local total = #items
+    local pageCount = math.max(1, math.ceil(total / LIST_PAGE_SIZE))
+    f.pageCounts = f.pageCounts or {}
+    f.pageCounts[f.tab] = pageCount
+    local page = math.max(1, math.min(f.pages[f.tab] or 1, pageCount))
+    f.pages[f.tab] = page
+    local first = (page - 1) * LIST_PAGE_SIZE + 1
+    local last = math.min(page * LIST_PAGE_SIZE, total)
+    f.status:SetText(total == 0 and "0 players" or
+        string.format("%d-%d of %d players", first, last, total))
+    f.pageIndicator:SetText(string.format("Page %d of %d", page, pageCount))
+    f.previousPage:SetEnabled(page > 1)
+    f.nextPage:SetEnabled(page < pageCount)
+    -- Clear list selection if filtering/paging has moved it out of view.
+    if f.selected then
+        local visible = false
+        for itemIndex = first, last do
+            if items[itemIndex].guid == f.selected then visible = true; break end
+        end
+        if not visible then f.selected = nil end
+    end
+
+    local index = 0
+    for itemIndex = first, last do
+        local item = items[itemIndex]
+        index = index + 1
         local row = f.rows[index] or self:CreateMainRow(index)
         row.record = item
         row.nameText:SetText(self:DisplayName(item.name))
@@ -450,8 +691,15 @@ function A:DrawMain()
         end
         row:Show()
     end
-    for index = #items + 1, #f.rows do f.rows[index]:Hide() end
-    f.content:SetHeight(math.max(1, #items * 40))
+    for rowIndex = index + 1, #f.rows do f.rows[rowIndex]:Hide() end
+    f.content:SetHeight(math.max(1, index * 40))
+    -- Do not jump back to the top on incoming rating updates, only on an actual
+    -- change of tab, search, source filter, or page.
+    local viewKey = table.concat({f.tab, filter, tostring(self.db.settings.allCharacters), tostring(page)}, "|")
+    if f.lastListViewKey ~= viewKey then
+        if f.scroller.SetVerticalScroll then f.scroller:SetVerticalScroll(0) end
+        f.lastListViewKey = viewKey
+    end
 end
 
 function A:CreateEditorWindow()
@@ -480,21 +728,92 @@ function A:CreateEditorWindow()
     f.selectedNumeric = label(f, "GameFontHighlight", "", 405, -243, 74)
     f.scoreText = label(f, "GameFontHighlightSmall", "", 28, -285, 430)
     label(f, "GameFontNormal", "Your comment (optional)", 28, -312)
-    f.comment = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    f.comment:SetSize(432, 85)
-    f.comment:SetPoint("TOPLEFT", 36, -339)
+    -- InputBoxTemplate is a SINGLE-LINE visual: using it with SetMultiLine
+    -- puts extra lines outside the thin input artwork. Instead, frame a real
+    -- multi-line EditBox inside a clipped ScrollFrame. Its height grows with
+    -- its text, while the viewport stays the same height.
+    f.commentBox = CreateFrame("Frame", nil, f, "BackdropTemplate")
+    f.commentBox:SetSize(432, 85)
+    f.commentBox:SetPoint("TOPLEFT", f, "TOPLEFT", 28, -339)
+    f.commentBox:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = false, edgeSize = 12,
+        insets = {left = 3, right = 3, top = 3, bottom = 3},
+    })
+    f.commentBox:SetBackdropColor(0.025, 0.03, 0.045, 1)
+    f.commentBox:SetBackdropBorderColor(0.40, 0.44, 0.52, 1)
+
+    -- The named UIPanelScrollFrameTemplate provides a visible scrollbar with
+    -- mouse/keyboard/drag controls. Reserve a strip within the comment border.
+    f.commentScroll = CreateFrame("ScrollFrame", "RateMeEditorCommentScrollFrame",
+        f.commentBox, "UIPanelScrollFrameTemplate")
+    f.commentScroll:SetPoint("TOPLEFT", f.commentBox, "TOPLEFT", 9, -8)
+    f.commentScroll:SetPoint("BOTTOMRIGHT", f.commentBox, "BOTTOMRIGHT", -33, 8)
+    f.commentBar = _G["RateMeEditorCommentScrollFrameScrollBar"]
+    if f.commentBar then
+        f.commentBar:ClearAllPoints()
+        f.commentBar:SetPoint("TOPLEFT", f.commentScroll, "TOPRIGHT", 5, -15)
+        f.commentBar:SetPoint("BOTTOMLEFT", f.commentScroll, "BOTTOMRIGHT", 5, 15)
+        f.commentBar:Show()
+    end
+    f.commentScroll:EnableMouseWheel(true)
+    f.commentScroll:SetScript("OnMouseWheel", function(scroll, delta)
+        scroll:SetVerticalScroll(math.max(0, math.min(scroll:GetVerticalScrollRange(),
+            scroll:GetVerticalScroll() - delta * 20)))
+    end)
+    f.commentScroll:SetScript("OnMouseDown", function() f.comment:SetFocus() end)
+
+    f.comment = CreateFrame("EditBox", nil, f.commentScroll)
+    f.comment:SetFontObject(ChatFontNormal or GameFontHighlight)
+    f.comment:SetTextColor(0.96, 0.95, 0.91)
     f.comment:SetMultiLine(true)
-    f.comment:SetMaxLetters(self.MAX_COMMENT)
+    f.comment:SetWidth(382)
+    f.comment:SetHeight(18) -- Multiline EditBoxes expand automatically as text wraps.
     f.comment:SetAutoFocus(false)
-    if f.comment.SetTextInsets then f.comment:SetTextInsets(6, 6, 6, 6) end
+    f.comment:SetMaxLetters(self.MAX_COMMENT)
+    if f.comment.SetMaxBytes then f.comment:SetMaxBytes(self.MAX_COMMENT) end
+    if f.comment.SetSpacing then f.comment:SetSpacing(2) end
+    f.commentScroll:SetScrollChild(f.comment)
+    f.commentBox:SetScript("OnMouseDown", function() f.comment:SetFocus() end)
+    -- Enter inserts a newline rather than saving/closing the rating window.
+    f.comment:SetScript("OnEnterPressed", function(self)
+        self:Insert("\n")
+        -- Some clients do not fire OnTextChanged for programmatic Insert().
+        if f.commentScroll.UpdateScrollChildRect then f.commentScroll:UpdateScrollChildRect() end
+        if f.bytes then f.bytes:SetText(tostring(#self:GetText()) .. " / " .. A.MAX_COMMENT .. " bytes") end
+    end)
     f.comment:SetScript("OnEscapePressed", function(self)
         self:ClearFocus()
         A:CloseTopWindow()
     end)
-    f.comment:SetScript("OnTextChanged", function(self)
-        if f.bytes then f.bytes:SetText(tostring(#self:GetText()) .. " / 160 bytes") end
+    f.comment:SetScript("OnCursorChanged", function(_, _, y, _, lineHeight)
+        if type(y) ~= "number" then return end
+        local scroll = f.commentScroll
+        if scroll.UpdateScrollChildRect then scroll:UpdateScrollChildRect() end
+        local cursorTop = math.max(0, -y)
+        local cursorBottom = cursorTop + (type(lineHeight) == "number" and lineHeight or 14)
+        local offset, height = scroll:GetVerticalScroll(), scroll:GetHeight()
+        if cursorTop < offset then
+            scroll:SetVerticalScroll(cursorTop)
+        elseif cursorBottom > offset + height then
+            scroll:SetVerticalScroll(cursorBottom - height)
+        end
     end)
-    f.bytes = label(f, "GameFontDisableSmall", "", 369, -428, 105, "RIGHT")
+    f.comment:SetScript("OnTextChanged", function(self)
+        local text = self:GetText()
+        -- SetText does not necessarily respect SetMaxBytes; enforce the actual
+        -- UTF-8 byte limit for pasted or prefilled comments as well.
+        if #text > A.MAX_COMMENT then
+            self:SetText(A:UTF8SafeCut(text, A.MAX_COMMENT))
+            return
+        end
+        if f.commentScroll.UpdateScrollChildRect then f.commentScroll:UpdateScrollChildRect() end
+        if f.bytes then f.bytes:SetText(tostring(#text) .. " / " .. A.MAX_COMMENT .. " bytes") end
+    end)
+    f.bytes = label(f, "GameFontDisableSmall", "0 / 160 bytes", 28, -432, 432, "RIGHT")
+    f.bytes:ClearAllPoints()
+    f.bytes:SetPoint("TOPRIGHT", f.commentBox, "BOTTOMRIGHT", -3, -4)
     f.save = button(f, "Save Rating", 125, 26, 28, -463, function()
         local ok, err = A:SaveOwnRating(f.target, f.score, f.comment:GetText())
         if ok then
@@ -708,7 +1027,7 @@ function A:OpenReportHelp(reviewer, target, vote)
     -- DisplayName() is intentionally NOT used for report attribution.
     f.author:SetText(evidence.author)
     f.context:SetText(string.format("Reviewed player (context ONLY): %s\nLogged message received: %s (client local time)",
-        tostring(target.name or "Unknown"), date("%Y-%m-%d %H:%M:%S", evidence.receivedAt)))
+        tostring(target.name or "Unknown"), self:DateText(evidence.receivedAt, true)))
     f.payload:SetText(evidence.payload)
     f:Show()
     self:MarkWindowShown(f)
@@ -929,16 +1248,20 @@ function A:InitializeUI()
     layoutWatcher:RegisterEvent("DISPLAY_SIZE_CHANGED")
     layoutWatcher:SetScript("OnEvent", function() A:ArrangeWindows() end)
     self.layoutWatcher = layoutWatcher
-    local mini = CreateFrame("Button", "RateMeMinimapButton", Minimap, "BackdropTemplate")
-    mini:SetSize(29, 29)
+    -- No square dialog backdrop: the round TGA has transparent corners, a
+    -- dark circular centre, and a subtle metallic rim at every UI scale.
+    -- The familiar bundled star stays independent of the circular background.
+    local mini = CreateFrame("Button", "RateMeMinimapButton", Minimap)
+    mini:SetSize(32, 32)
     mini:SetFrameStrata("MEDIUM")
     mini:SetFrameLevel(Minimap:GetFrameLevel() + 5)
-    mini:SetBackdrop({bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = false, edgeSize = 14, insets = {left = 3, right = 3, top = 3, bottom = 3}})
-    mini:SetBackdropColor(0.10, 0.11, 0.17, 0.94)
-    local icon = mini:CreateTexture(nil, "OVERLAY")
-    icon:SetSize(19, 19)
-    icon:SetPoint("CENTER", mini, "CENTER", 0, 1)
+    local disc = mini:CreateTexture(nil, "BACKGROUND")
+    disc:SetAllPoints(mini)
+    disc:SetTexture("Interface\\AddOns\\RateMe\\Media\\MinimapCircle.tga")
+    mini.backgroundTexture = disc
+    local icon = mini:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(25, 25)
+    icon:SetPoint("CENTER", mini, "CENTER", 0, 0)
     icon:SetTexture(self.STAR_FULL_TEXTURE)
     mini.starTexture = icon
 

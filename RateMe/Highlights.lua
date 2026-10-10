@@ -12,7 +12,8 @@ local PASSIVE_QUERIES_PER_MINUTE = 6
 local PENDING_LIMIT = 20
 
 function A:HighlightColor(guid)
-    if not self.db or not self.db.settings.ratingHighlights then return nil end
+    if not self.db or not self.db.settings.ratingHighlights
+        or not self.db.settings.ratingHighlightsGlow then return nil end
     local settings = self.db.settings
     local personal = settings.ratingHighlightsPersonal and self:GetPersonalScore(guid) or nil
     local community = settings.ratingHighlightsCommunity and self:GetFreshCommunityScore(guid) or nil
@@ -21,6 +22,35 @@ function A:HighlightColor(guid)
     if (personal and personal < 2) or (community and community < 2) then return RED end
     if (personal and personal >= 4) or (community and community >= 4) then return GOLD end
     return nil
+end
+
+-- The nameplate badge is distinct from glow: always one star showing one
+-- numeric score. A fresh community sample has priority when both sources are
+-- selected; the owner's score is a local fallback, never a stale peer sample.
+function A:NameplateBadgeScore(guid)
+    local settings = self.db and self.db.settings
+    if not settings or not settings.ratingHighlights or not settings.ratingHighlightsBadge then return nil end
+    if settings.ratingHighlightsCommunity then
+        local score = self:GetFreshCommunityScore(guid)
+        if type(score) == "number" and score >= 1 and score <= 5 then return score, "community" end
+    end
+    if settings.ratingHighlightsPersonal then
+        local score = self:GetPersonalScore(guid)
+        if type(score) == "number" and score >= 1 and score <= 5 then return score, "personal" end
+    end
+    return nil
+end
+
+function A:WantsCommunityIndicators()
+    local s = self.db and self.db.settings
+    return s and s.ratingHighlights and (s.ratingHighlightsGlow or s.ratingHighlightsBadge)
+        and s.ratingHighlightsCommunity
+end
+
+local function badgeColor(score)
+    if score < 2 then return RED end
+    if score >= 4 then return GOLD end
+    return {0.72, 0.78, 0.88}
 end
 
 local function usable(frame)
@@ -97,6 +127,40 @@ local function makeGlow(anchor, nameplate)
     return overlay
 end
 
+-- Parent to UIParent, not Blizzard's protected nameplate frames. All anchors
+-- are changed only out of combat; texture/text visibility is safe to refresh.
+local function makeBadge(anchor)
+    local badge = CreateFrame("Frame", nil, UIParent)
+    badge:SetSize(46, 46)
+    badge:EnableMouse(false)
+    badge:SetFrameStrata("HIGH")
+    local ok, level = pcall(function() return anchor:GetFrameLevel() end)
+    badge:SetFrameLevel((ok and type(level) == "number" and level or 1) + 6)
+    badge:SetPoint("RIGHT", anchor, "LEFT", -5, 0)
+    local star = badge:CreateTexture(nil, "ARTWORK")
+    star:SetTexture("Interface\\AddOns\\RateMe\\Media\\StarFull.tga")
+    star:SetSize(46, 46)
+    star:SetPoint("CENTER", badge, "CENTER", 0, 0)
+    local value = badge:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    value:SetPoint("CENTER", badge, "CENTER", 0, -1)
+    value:SetJustifyH("CENTER")
+    value:SetWidth(40)
+    if value.SetFont then
+        value:SetFont(STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+    end
+    value:SetTextColor(1, 1, 1, 1)
+    if value.SetShadowColor then value:SetShadowColor(0, 0, 0, 1) end
+    if value.SetShadowOffset then value:SetShadowOffset(1, -1) end
+    function badge:SetRating(score)
+        local tint = badgeColor(score)
+        star:SetVertexColor(tint[1], tint[2], tint[3], 1)
+        value:SetText(string.format("%.1f", math.floor(score * 10 + 0.5) / 10))
+        self:Show()
+    end
+    badge:Hide()
+    return badge
+end
+
 -- Limit the aura to the actual nameplate health bar when WoW exposes it.
 -- The previous effect outlined the whole UnitFrame and looked like a box.
 local function visibleBar(frame)
@@ -126,8 +190,7 @@ local function nameplateGlowAnchor(plate)
 end
 
 function A:QueuePassiveHighlightLookup(target)
-    if not self.db.settings.ratingHighlights or not self.db.settings.ratingHighlightsCommunity
-        or not self:ValidateStoredTarget(target) then return end
+    if not self:WantsCommunityIndicators() or not self:ValidateStoredTarget(target) then return end
     local current = self:GetSummary(target.guid)
     if current and current.fresh then return end
     if self.pendingHighlightTargets[target.guid] then return end
@@ -138,8 +201,7 @@ function A:QueuePassiveHighlightLookup(target)
 end
 
 function A:ProcessPassiveHighlightLookups()
-    if not self.db.settings.ratingHighlights or not self.db.settings.ratingHighlightsCommunity
-        or isPvEInstance() then return end
+    if not self:WantsCommunityIndicators() or isPvEInstance() then return end
     local now = self:Now()
     local budget = self.passiveHighlightBudget
     if now - budget.started >= 60 then
@@ -194,8 +256,17 @@ function A:OnNameplateAdded(unit)
     entry.unit, entry.guid = unit, target.guid
     local color = self:HighlightColor(target.guid)
     if color then entry.overlay:SetRatingColor(color) else entry.overlay:Hide() end
+    if self.db.settings.ratingHighlightsBadge and not entry.badge
+        and not (InCombatLockdown and InCombatLockdown()) then
+        local okBadge, badge = pcall(makeBadge, entry.anchor)
+        if okBadge then entry.badge, entry.badgeAnchor = badge, entry.anchor end
+    end
+    if entry.badge then
+        local score = self:NameplateBadgeScore(target.guid)
+        if score then entry.badge:SetRating(score) else entry.badge:Hide() end
+    end
     local summary = self:GetSummary(target.guid)
-    if self.db.settings.ratingHighlightsCommunity and (not summary or not summary.fresh) then
+    if self:WantsCommunityIndicators() and (not summary or not summary.fresh) then
         self:QueuePassiveHighlightLookup(target)
     end
 end
@@ -205,6 +276,7 @@ function A:OnNameplateRemoved(unit)
         if entry.unit == unit then
             entry.unit, entry.guid = nil, nil
             entry.overlay:Hide()
+            if entry.badge then entry.badge:Hide() end
         end
     end
 end
@@ -259,10 +331,12 @@ function A:RefreshHighlights()
     for plate, entry in pairs(self.nameplateHighlights) do
         if not enabled or isPvEInstance() or not usable(plate) or not entry.unit then
             entry.overlay:Hide()
+            if entry.badge then entry.badge:Hide() end
         else
             local current = self:CaptureUnit(entry.unit)
             if not current or current.guid ~= entry.guid then
                 entry.overlay:Hide()
+                if entry.badge then entry.badge:Hide() end
                 entry.guid, entry.unit = nil, nil
             else
                 -- Blizzard sometimes lays out the health bar after the unit-
@@ -276,13 +350,28 @@ function A:RefreshHighlights()
                         end)
                         if okAnchor then entry.anchor = anchor end
                     end
+                    if self.db.settings.ratingHighlightsBadge and not entry.badge then
+                        local okBadge, badge = pcall(makeBadge, entry.anchor)
+                        if okBadge then entry.badge, entry.badgeAnchor = badge, entry.anchor end
+                    end
+                    if entry.badge and entry.badgeAnchor ~= entry.anchor then
+                        local okBadgeAnchor = pcall(function()
+                            entry.badge:ClearAllPoints()
+                            entry.badge:SetPoint("RIGHT", entry.anchor, "LEFT", -5, 0)
+                        end)
+                        if okBadgeAnchor then entry.badgeAnchor = entry.anchor end
+                    end
                 end
                 local color = self:HighlightColor(entry.guid)
                 if color then entry.overlay:SetRatingColor(color) else entry.overlay:Hide() end
+                if entry.badge then
+                    local score = self:NameplateBadgeScore(entry.guid)
+                    if score then entry.badge:SetRating(score) else entry.badge:Hide() end
+                end
             end
         end
     end
-    if not enabled then
+    if not enabled or not self.db.settings.ratingHighlightsGlow then
         for _, entry in pairs(self.groupFrameHighlights) do entry.overlay:Hide() end
         return
     end
@@ -309,7 +398,7 @@ function A:RefreshHighlights()
 end
 
 function A:OnHighlightSettingsChanged()
-    if not self.db.settings.ratingHighlights or not self.db.settings.ratingHighlightsCommunity then
+    if not self:WantsCommunityIndicators() then
         self.pendingHighlightTargets = {}
     end
     self:RefreshHighlights()
@@ -348,7 +437,11 @@ function A:InitializeHighlights()
             A:OnHighlightSettingsChanged()
         elseif event == "PLAYER_ENTERING_WORLD" then
             -- Hide all old plate overlays across instance/zone transitions.
-            for _, entry in pairs(A.nameplateHighlights) do entry.overlay:Hide(); entry.guid = nil; entry.unit = nil end
+            for _, entry in pairs(A.nameplateHighlights) do
+                entry.overlay:Hide()
+                if entry.badge then entry.badge:Hide() end
+                entry.guid = nil; entry.unit = nil
+            end
             A:RefreshHighlights()
         else
             A:RefreshHighlights()

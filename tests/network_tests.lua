@@ -77,3 +77,22 @@ assert(not A:OnMessage('RATEME2','Q|x|Player-ABC-123|Me-Realm|2','WHISPER','Othe
 assert(A.netStats.querySeeds==3)
 assert(A.outbox[1].channel=='WHISPER')
 print('PASS: RATEME prefix and discovery-only broadcasts')
+-- Multiline written reviews must survive the direct logged-message path and
+-- remain reportable against their originating sender, not the reviewed target.
+local storage = assert(loadfile('RateMe/Storage.lua')); storage('RateMe', A)
+local safety = assert(loadfile('RateMe/CommentSafety.lua')); safety('RateMe', A)
+reset(); A.db.settings={hideCommentsByDefault=false}
+A.MAX_RECENT=150; A.db.authored={[A:Key(A.myName)]={}}
+assert(A:Query(target)); advance(1)
+local rid=next(A.runtime.requests)
+local reviewer='Voter001-Realm'
+A:HandleRating({'R',rid,target.guid,'5','2','100000','1'}, reviewer)
+A.runtime.cache[target.guid]={votes=A.runtime.requests[rid].votes}
+A.runtime.comments['c-1']={guid=target.guid,reviewer=A:Key(reviewer),expires=20}
+local raw='C|c-1|'..target.guid..'|2|Excellent tank\nWould group again'
+A:OnMessage('RATEME',raw,'WHISPER',reviewer,true)
+local vote=A.runtime.cache[target.guid].votes[A:Key(reviewer)]
+assert(vote.comment=='Excellent tank\nWould group again')
+local evidence=A:GetCommentReportEvidence(target.guid,A:Key(reviewer),vote)
+assert(evidence and evidence.author==reviewer and evidence.comment==vote.comment)
+print('PASS: newline-preserving logged comments retain authenticated report author')

@@ -17,7 +17,7 @@ Enable **Rate Me!** in the character-selection AddOns list, then log into the ga
 ## Usage
 
 - **Right-click an eligible friendly player** and choose **Rate Me!**. The option only appears when a valid player unit can be identified.
-- **/rateme** — open the main window (My Ratings / Recent Lookups / Settings).
+- **/rateme** — open the main window. **My Ratings**, **Recent Lookups**, and **Settings** sit together at the upper right of the title bar, beside **Rate Me!**.
 - **/rateme target** — rate your current target (also useful if its context menu lacks a unit token).
 - **/rateme reviews** — open community reviews for your current target.
 - **Window layout** — the main browser, rating editor, and community reviews open side by side instead of on top of one another. Visible windows are centered together and automatically scaled to fit smaller game windows. They can still be moved manually.
@@ -31,7 +31,11 @@ Enable **Rate Me!** in the character-selection AddOns list, then log into the ga
 
 In **Rate Me! windows** (My Ratings, Recent Lookups, rating editor, and community reviews), every available score shows **five bundled stars immediately followed by its numeric value rounded to one decimal** (for example, `4.3`). Stars visually round to the nearest **half-star**, with full, half, and empty textures; the numeric value is rounded separately to 0.1 and retains the more precise average. Review counts remain visible. In game **tooltips** and low-rating chat notifications, scores remain stars-only. The exact underlying averages are retained for alerts and calculations.
 
-In the rating editor, view current community rating alongside your own score and comment. You can save, update, or remove your rating. Your own ratings persist in SavedVariables by reviewer character, and can be browsed from **My Ratings** even when targets are offline. In **Community Reviews**, written comments can be hidden/revealed, blocked by author, or reported via a support-guidance dialog. Blocking a reviewer hides their comments locally without changing the community average. The **Recent Lookups** tab keeps up to 150 target identities and their last summary snapshots. **My Ratings** and **Recent Lookups** are automatically sorted by their displayed date (newest first), with non-clickable column headings.
+In the rating editor, view current community rating alongside your own score and comment. The comment field is a multi-line, scrollable area with its 160-byte counter immediately below; intentional line breaks are preserved. You can save, update, or remove your rating. Your own ratings persist in SavedVariables by reviewer character, and can be browsed from **My Ratings** even when targets are offline. In **Community Reviews**, written comments can be hidden/revealed, blocked by author, or reported via a support-guidance dialog. Blocking a reviewer hides their comments locally without changing the community average. The **Recent Lookups** tab keeps up to 150 target identities and their last summary snapshots. **My Ratings** and **Recent Lookups** are automatically sorted by their displayed date (newest first), with non-clickable column headings. Both lists are paginated at **20 players per page**; Previous/Next controls and a page indicator appear below the list, with a result count above it. Search is placed at the bottom left with an **X** button to clear it, and filters all entries *before* paging. The **My Ratings** section in Settings has an **All Characters** checkbox to include reviews saved by other characters on the same account. It controls the list only: reviews stay attributed to their original author character. Refresh is available from a player’s drilldown, not the list footer. Changing search text or the All Characters preference returns the list to page 1. No network lookups are triggered by paging alone.
+
+## Date and time handling
+
+Ratings, removals, recent views/checks, peer sightings, and logged comment receipt times are stored and exchanged as **UTC-based Unix epoch seconds** (no local timezone offset). Existing saved timestamps are already in that form and are retained unchanged; no data migration or timezone conversion is necessary. All visible dates use the **player's client-local timezone** and **12-hour AM/PM** notation, for example `2026-10-10 08:35 PM`. The comment-report evidence dialog also shows local time, including seconds. Sorting and pagination compare the original numeric timestamps, not the formatted display strings. Changing the computer's timezone changes only how dates appear, not the stored rating times.
 
 ## Settings — Minimap Button
 
@@ -60,7 +64,9 @@ Open `/rateme` > **Settings** > **Group Rating Alerts**.
 
 Open `/rateme` > **Settings** > **Player Rating Highlights**.
 
-- **Highlight rated friendly players** is OFF by default; choose independent **personal** and/or **community** rating sources below the master switch.
+- **Enable rating indicators for friendly players** is OFF by default. **Glow** and **Show a star with the numeric rating beside nameplates** are independent options underneath it; glow remains ON within the master control for existing installations, while the new badge defaults OFF.
+- Choose independent **personal** and/or **community** rating sources. The badge shows a single one-decimal score inside a bundled star, preferring a **fresh community** average and falling back to your personal score if selected. No badge appears without an eligible score. The badge is **gold** at 4.0+, **red** below 2.0, and **neutral** otherwise; the colour glow retains its own rules.
+- The badge appears beside eligible *visible open-world nameplates* only; it does not modify Blizzard's name text or generate a 3D world aura. Client restrictions can suppress nameplate additions in PvE instances.
 - **Gold:** any enabled, available source scores **4.0 or higher**.
 - **Red:** any enabled, available source scores **below 2.0**. **Red takes priority** over gold if the two enabled sources disagree.
 - **No glow:** both enabled/available scores are in the 2.0–3.9 range, or there are no eligible ratings.
@@ -78,7 +84,7 @@ Open `/rateme` > **Settings** > **Comment Safety**:
 - **Block/Unblock** suppresses that reviewer's comments locally and prevents new comment requests to them. It does not change the aggregate numeric community rating; blocks persist in SavedVariables.
 - **Report** is enabled only for a directly received `CHAT_MSG_ADDON_LOGGED` comment with consistent sender, target, revision, and exact text. It opens manual support guidance identifying the verified **comment author** (`Character-Realm`) as the player to report, and lists the reviewed player only as context. It includes the logged-message text and receipt date, plus a copyable Blizzard Support URL. It **does not** submit an in-game report or ticket; users submit their own report. A copied review or a personal local comment cannot impersonate a reportable author.
 - Comments are transmitted only through `C_ChatInfo.SendAddonMessageLogged()` and processed via `CHAT_MSG_ADDON_LOGGED`. No fallback to ordinary, unlogged addon messages. Numeric ratings and peer discovery continue using regular addon messaging.
-- Comments are limited to 160 UTF-8 bytes and sanitized to prevent control characters and WoW formatting codes (pipes, links, textures) from being rendered. This **is not profanity filtering**. The sanitized comment remains intact for display and reporting.
+- Comments are limited to 160 UTF-8 bytes and sanitized to prevent disallowed control characters and WoW formatting codes (pipes, links, textures) from being rendered. Intentional line breaks are allowed. This **is not profanity filtering**. The sanitized comment remains intact for display and reporting.
 
 ## Displayed player names
 
@@ -140,3 +146,11 @@ as existing Rate Me! windows. In-game testing on Forever is still required.
 - Rating highlights now use bundled alpha-gradient TGA textures for a diffuse gold or red glow, rather than a hard rectangular outline. Nameplate glows attach to the visible health bar when the client exposes one; supported Blizzard party and raid frames use the same soft glow.
 - Main window grid columns (Player, Rating, and Date/Last Checked) are right-aligned, including their headings. Numeric star ratings in the review grid are also right-aligned.
 - Gold and red glow boundaries remain 4.0+ and below 2.0; personal and community sources can be toggled independently in Settings.
+
+### Settings layout (local preview)
+
+The Settings tab groups its controls into Alerts, Highlights, Post-Party Ratings, Comment Safety, and Minimap. Dependent options are indented and dim when their parent feature is disabled. Checkbox text explains each action, with no additional help icons or subtitles under the section headings. Preferences save immediately as before.
+
+The rating editor offers a multiline comment field with a visible vertical scrollbar (mouse wheel, arrow buttons, or draggable thumb when text overflows), with the byte counter directly underneath.
+
+The minimap shortcut uses a circular gold-star button. Left-click to toggle the main window; left-drag to reposition it.

@@ -9,8 +9,8 @@ This addon is a beta build. Static tests do not replace exercising Forever's liv
 4. Right-click an NPC, a pet, yourself, and (if available) an opposite-faction player; the menu entry must not appear.
 5. Rate a friendly player, update the comment and stars, then remove and re-add the rating.
 6. Check that `/reload` and a normal logout/login preserve your ratings.
-7. Verify My Ratings search and edit flow, and that newest ratings appear first with no sort buttons. Check current-character/all-character toggle.
-8. Verify Recent Lookups, refresh, last-checked/cached indicators, and newest lookup dates first (no sort buttons).
+7. Verify My Ratings search and edit flow, and that newest ratings appear first with no sort buttons. Change the All Characters checkbox under Settings > My Ratings; confirm the list updates without a footer toggle.
+8. Verify Recent Lookups, drilldown Refresh, last-checked/cached indicators, and newest lookup dates first (no sort buttons).
 9. Hover a group member: tooltip should show community score, count, and own score when known.
 10. Change target with rating editor open, then save; review must still be attributed to the original player.
 
@@ -186,3 +186,84 @@ The standalone protocol regression harness lives at `tests/network_tests.lua` in
 6. Confirm the client enforces per-peer, per-origin, and global inbound limits, prunes expired counters, and avoids a guild-wide acknowledgement storm when many addon users join simultaneously.
 7. A newer revision supersedes an earlier one; a deletion tombstone must not be revived by an older rating reply. Verify comment traffic still uses logged whisper messages only.
 8. Test 5 simultaneous different-target lookups, queue throttling, retries, client disconnects, no known peers and peers that arrive after a query starts. Inspect `/rateme netstats` for queue size, sent/received counts, and drops.
+
+## Multiline rating editor (local preview)
+
+1. Open **Right-click → Rate Me!** and type a long comment. It should wrap within a visible, opaque rectangular text field instead of appearing outside a single-line input strip.
+2. Press Enter to create several lines. Confirm the viewport stays fixed, the text scrolls to keep the caret visible, and the mouse wheel scrolls within the text field.
+3. Confirm the byte count is right-aligned **immediately below the comment field**, with Save/Reviews/Cancel below it and no overlap. Test an empty comment, a full 160-byte comment, and a pasted comment exceeding 160 bytes.
+4. Save, reopen the rating editor and check that intentional line breaks persist. On a second updated client, fetch the comment and confirm its line breaks and logged-message report author remain intact.
+5. Press Escape while editing: the current Rate Me! window should close.
+
+Offline tests: `tests/editor_multiline_tests.lua`, `tests/network_tests.lua`, and `tests/settings_ui_tests.lua`. Real Forever client rendering and multi-client logged messaging still need verification.
+
+## Compact Settings and visible comment scrollbar (local preview)
+
+1. Open `/rateme` > Settings and confirm there is no separate **Preferences** heading/introduction. The six functional panels (starting with My Ratings) start near the top, remain opaque, are visually separated, and are reachable by scrolling at common UI scales.
+2. Confirm the checkboxes describe their effect directly. The personal/community controls remain indented under their respective master switches and dim when disabled. Existing preference values survive an update.
+3. Confirm there are **no help icons** or explanatory subtitles directly beneath the six section headings. The expanded checkbox labels remain self-explanatory; the colour legend and concise notes under individual controls remain.
+4. In the rating editor, confirm a **visible vertical scrollbar** sits inside the comment field at its right edge. Write enough text to wrap past the fixed-height viewport; scroll by mouse wheel, scrollbar arrows, and thumb drag. Text must not render behind the scrollbar or outside the field.
+5. Confirm the 160-byte count remains immediately beneath the comment field and the action buttons do not overlap it, including at smaller window sizes.
+
+## Settings panel width and headers (local preview)
+
+- [ ] All six Settings panels extend close to the right edge of the scrollable area, with even horizontal margins; none run underneath the scrollbar.
+- [ ] Headings are plain gold text, with no narrow decorative bar or unexpected glyph to their left.
+- [ ] Scroll the entire Settings page and verify panels have no overlaps and controls remain clickable.
+- [ ] Resize/change UI scale, then reopen Settings and confirm panel widths track the content area.
+- [ ] Alerts and Highlights source toggles still enable/disable dependent threshold controls as before.
+
+## Player-list pagination and footer layout (version 1 local preview)
+
+1. In both player lists, verify **Search** sits at the bottom left, close to its label, with an **X** button on the right. There must be no duplicate Search field near the top and no other list-footer buttons.
+2. Settings hides list-only controls. Confirm there are **no All Characters or Refresh Selected Target** buttons in either list. Refresh remains available in the selected player’s drilldown.
+3. Populate 45 personal ratings and confirm page 1 has 20, page 2 has 20, and page 3 has 5 entries. Previous is disabled on page 1; Next is disabled on page 3.
+4. Verify both lists sort by date newest-first over their **full dataset**, then display the chosen page. Paging must not reorder or network-query entries.
+5. Search for an entry originally on page 3: it must appear on page 1 of the filtered results. Clear search to restore the entire list and reset to page 1.
+6. In Settings > **My Ratings**, toggle **Show ratings from all my characters in My Ratings** while My Ratings is on a later page; returning to My Ratings must show page 1 with the updated list. Do not change authorship or saved ratings. Changing tabs must never render stale rows from another list.
+7. Verify an empty search result shows `0 players`, `Page 1 of 1`, no rows, and disabled Previous/Next buttons.
+8. Change pages after scrolling down and verify the new page begins at the top. A background rating refresh on the same page should not change scroll position.
+9. Confirm Player, Rating, and Date/Last checked headings remain right-aligned with their row values.
+
+
+## Main-window header navigation (version 1 local preview)
+
+1. Open `/rateme`: **Rate Me!** is at upper left, with **My Ratings**, **Recent Lookups**, and **Settings** in one row to its right. The close button remains unobstructed.
+2. The tagline **Reputation earned. Reputation shared.** appears left-aligned to the exact same X position as the title, without touching the tab controls. There is no second row of tab buttons.
+3. Switch through all three tabs. The correct content and disabled active-tab state should remain intact; the 20-row list paging, search footer, and Settings scroll panel should behave as before.
+4. Open the editor or reviews window alongside the main window; the title-bar buttons must remain clickable and not overlap the window border/close control after automatic layout scaling.
+
+### Numeric nameplate badge preview (version 1)
+
+- Enable Player Rating Highlights, then enable the separate nameplate star badge while leaving glow disabled. Verify the star appears alongside visible eligible friendly player nameplates without requiring glow.
+- Try personal-only, community-only, and both sources. With both enabled, fresh community takes precedence; if unavailable, personal can be shown. Never display stale community samples as fresh.
+- Confirm a one-decimal numeric label inside the bundled star (gold 4.0+, red below 2.0, neutral otherwise), and that hiding the nameplate, disabling the option, changing zones, or changing unit removes/reuses the badge correctly.
+- Confirm no NPC, enemy, self, or prohibited PvE nameplate badge, and no protected-frame anchors changed in combat. Verify actual Forever rendering in game; offline mock checks cannot establish nameplate compatibility.
+
+## Main-window section dividers (version 1 local preview)
+
+1. Open `/rateme` > My Ratings. A thin muted-grey horizontal line should separate the title/navigation row from the player list, and another should separate the list from pagination and Search. Lines should have matching left/right insets.
+2. Switch to Recent Lookups: both rules should remain in the same positions, without overlapping column headers, scrollbar, pager, or clear-search control.
+3. Switch to Settings: only the upper/title divider should remain. The lower list/footer divider must hide so it does not cross Settings panels. Return to a list: the lower divider reappears.
+4. Test at non-default UI scale to confirm that the rules stay attached to the main window and do not appear as stray characters or glyphs.
+
+## Main window visual sections (v1 preview)
+
+1. On both My Ratings and Recent Lookups, verify a full-width subtle rule separates the title/navigation from the content area.
+2. Verify the column headings are separated from the scrolling list by a lighter, narrower rule without overlapping the first player row.
+3. Verify the pager, Search box and clear X sit on a slightly darker footer, below a separate rule. None of the rules or footer background should intercept clicks.
+4. Switch to Settings: the header rule remains, but the list-specific column rule, paging footer and footer divider disappear. Switch back and confirm they return.
+5. Verify the borders, scrollbar, pagination, column alignment and Search controls remain unchanged at different UI scales.
+
+## Current list, badge and timestamp acceptance checks
+
+1. My Ratings and Recent Lookups show 20 entries per page, independent pagers, newest first, and search applies across the complete list before pagination. The page indicator and right-aligned player count share the pager row.
+2. List headers align horizontally with name, score and timestamp cells. Row shading reaches the usable scroll content edge beside the scrollbar, even immediately on first open or after UI scaling changes.
+3. Search label sits with a little gap to the input border. Clear X is aligned to the visible textbox and is disabled when empty. The footer has a divider below pager, before Search. Settings hides list-only controls.
+4. Check Settings > My Ratings > All Characters, with two characters contributing authored ratings. Confirm toggling updates the saved view preference, not the underlying records.
+5. Rating and lookup times display the local client's `YYYY-MM-DD hh:mm AM/PM` format; report evidence includes seconds. The database keeps timezone-neutral Unix epoch seconds; a different client timezone must not shift the underlying stored timestamp.
+6. A 32px round minimap icon uses its own transparent round texture and a centred 25px gold star, retaining click/drag/visibility functionality.
+7. The independent nameplate badge is positioned left of the actual health bar, shows a 1-decimal score in 11pt outline text centred in the star, and preserves community-first/personal fallback, gold/red/neutral colour and combat-safe frame lifecycle.
+8. Enter two-line comments and scroll them within the visible comment box. Newlines survive saved comments and logged transport; the 160-byte limit counts UTF-8 bytes.
+
+All rendering, WoW UI template metrics, game timestamps and nameplate positioning require a real WoW Forever client check.

@@ -37,9 +37,13 @@ A.myGuid = nil
 A.myFaction = nil
 A.runtime = { cache = {}, requests = {}, seen = {}, comments = {} }
 
+-- Monotonic/session time for deadlines. Never persist or display this value.
 function A:Now()
     return GetTime()
 end
+-- Persist and exchange UTC-based Unix epoch seconds (no timezone offset).
+-- GetServerTime() is already an epoch timestamp, not a server-local clock
+-- string; time() is also epoch seconds on clients without that API.
 function A:Stamp()
     if GetServerTime then return GetServerTime() end
     return time()

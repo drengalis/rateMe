@@ -32,6 +32,9 @@ function A:InitializeStorage()
     db.settings.minimapAngle = db.settings.minimapAngle % 360
     -- Visual reputation highlights are opt-in; keep all existing settings intact.
     if type(db.settings.ratingHighlights) ~= "boolean" then db.settings.ratingHighlights = false end
+    -- Preserve existing glow behaviour on upgrade; new numeric nameplate badge is opt-in.
+    if type(db.settings.ratingHighlightsGlow) ~= "boolean" then db.settings.ratingHighlightsGlow = true end
+    if type(db.settings.ratingHighlightsBadge) ~= "boolean" then db.settings.ratingHighlightsBadge = false end
     -- Show a multi-player rating form after leaving a non-raid party.
     if type(db.settings.partyReviewPrompt) ~= "boolean" then db.settings.partyReviewPrompt = true end
     -- Source preferences are independent for alerts and visual highlights.
@@ -106,8 +109,10 @@ function A:UTF8SafeCut(text, maxBytes)
 end
 function A:SanitizeComment(value)
     if type(value) ~= "string" then return "" end
-    -- WoW formatting escapes can render links/textures; remove pipes and control chars.
-    value = value:gsub("|", ""):gsub("[%c]", " ")
+    -- Preserve intentional line breaks in multi-line reviews, but remove all
+    -- other control characters and WoW markup delimiters (links/textures).
+    value = value:gsub("\r\n", "\n"):gsub("\r", "\n")
+    value = value:gsub("|", ""):gsub("[%z\1-\9\11-\31\127]", " ")
     return self:UTF8SafeCut(value, self.MAX_COMMENT)
 end
 
