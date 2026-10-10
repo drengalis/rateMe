@@ -173,3 +173,16 @@ The reduced window scale on narrow displays is intentional: it prevents overlap 
 5. A personally authored comment and any old cached comment lacking a captured logged source must have Report disabled.
 6. The dialog must clearly state that it provides guidance only; the user submits the Blizzard Support ticket.
 7. Verify that requerying and switching reviewed players never reuses the previous review's report author.
+
+## Scalable network lookup regression (version 1, internal protocol 2)
+
+The standalone protocol regression harness lives at `tests/network_tests.lua` in the GitHub repository. Run it from the repository root with `texlua tests/network_tests.lua` (Lua 5.3 is sufficient for this mock test; actual Forever testing remains necessary).
+
+1. Install the updated addon on **all** test clients; the addon remains version 1 but registers the `RATEME2` addon-message prefix. Older Rate Me! clients do not participate in the new query protocol.
+2. In a populated guild, use `/rateme netstats`, request one player rating and verify guild and party/raid traffic is HELLO discovery only. Rating queries must be direct addon whispers.
+3. Confirm the initial wave queues up to three direct queries, expands about four seconds later only if fewer than five verified votes have arrived, and may expand again around nine seconds. No more than seven initial seed queries per lookup; with honest, unique peers the two-hop forwarding tree reaches no more than 91 query recipients.
+4. Verify that repeated mouseovers or forced refreshes during the same active lookup do not start a second query for the same GUID. The lookup completes in approximately 15 seconds.
+5. Check that duplicate relayed query IDs forward only once per peer; a guild-wide `Q` packet must be ignored. Valid returned votes are direct from original reviewers, and at most 100 distinct remote reviewers can contribute to one request.
+6. Confirm the client enforces per-peer, per-origin, and global inbound limits, prunes expired counters, and avoids a guild-wide acknowledgement storm when many addon users join simultaneously.
+7. A newer revision supersedes an earlier one; a deletion tombstone must not be revived by an older rating reply. Verify comment traffic still uses logged whisper messages only.
+8. Test 5 simultaneous different-target lookups, queue throttling, retries, client disconnects, no known peers and peers that arrive after a query starts. Inspect `/rateme netstats` for queue size, sent/received counts, and drops.

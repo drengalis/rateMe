@@ -89,6 +89,8 @@ function A:InitializeIntegration()
         elseif msg == "debug" then
             A.db.settings.debug = not A.db.settings.debug
             A:Log("Debug logging: " .. (A.db.settings.debug and "on" or "off"))
+        elseif msg == "netstats" then
+            A:Log(A:NetworkStatsText())
         elseif msg == "peers" then
             local count = 0
             for _ in pairs(A.db.peers) do count = count + 1 end
@@ -106,7 +108,7 @@ function A:InitializeIntegration()
             A:DrawSettings()
             A:Log("Minimap button hidden. Type /rateme to open the addon.")
         elseif msg == "help" then
-            A:Log("/rateme — main window; /rateme party — last party; /rateme target — rate target; /rateme reviews — reviews for target; /rateme minimap [show|hide]; /rateme peers; /rateme debug")
+            A:Log("/rateme — main window; /rateme party — last party; /rateme target — rate target; /rateme reviews — reviews for target; /rateme minimap [show|hide]; /rateme peers; /rateme netstats; /rateme debug")
         else
             A:ToggleMain()
         end

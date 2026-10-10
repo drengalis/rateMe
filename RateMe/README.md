@@ -1,6 +1,6 @@
 # Rate Me! — WoW Forever addon
 
-**Version:** 1  
+**Version:** 1 (internal messaging protocol 2)  
 **Target:** World of Warcraft Forever 1.60.1, Interface `16001`  
 **Status:** Functional beta implementation; in-client testing required.
 
@@ -25,6 +25,7 @@ Enable **Rate Me!** in the character-selection AddOns list, then log into the ga
 - **Escape** — closes the most recently opened Rate Me! window; press again to close other open windows. Escape also works while typing in Search or Comment.
 - **/rateme peers** — display the number of known peers.
 - **/rateme debug** — toggle diagnostic logging.
+- **/rateme netstats** — show network traffic and throttling counters for this session.
 - **Minimap star** — left-click to toggle the main window, or left-drag to reposition around the minimap. Position is saved.
 - **/rateme minimap** — toggle minimap icon visibility; `/rateme minimap show` and `/rateme minimap hide` are also available.
 
@@ -85,9 +86,9 @@ Rate Me! windows and its chat/on-screen notifications display character and real
 
 ## How ratings are retrieved
 
-The client advertises itself to the party, raid, instance and guild using `C_ChatInfo.SendAddonMessage` with prefix `RATEME`. Known peers can be introduced and queried through addon whispers. Requests may be forwarded at most two hops, to up to three peers per hop, with additional per-peer rate limits and bounded discovery probes. **Votes themselves are NEVER copied as authoritative data through the network.** Every counting vote must be returned by that reviewer's own online client directly to the original requester. A query yields an average of *reachable reviewer replies*, not an authoritative worldwide rating.
+The client advertises itself to party, raid, instance and guild using `C_ChatInfo.SendAddonMessage` with prefix `RATEME2` (internal protocol 2; the addon still displays **version 1**). These group/guild broadcasts are **discovery only**. Rating queries are sent exclusively to known peers through addon whispers, never as guild/party/raid broadcasts. An initial lookup contacts at most three peers; after approximately four and nine seconds it may expand if fewer than five verified votes have arrived. At most seven root peers are contacted. Each recipient forwards no more than three times and for at most two hops: the honest-network upper bound is 7 × (1 + 3 + 9) = **91 query recipients**, before duplicates and unavailable clients. One hundred distinct remote reviewer replies is the defensive acceptance cap; requests expire after about **15 seconds**. Additional per-sender, per-origin, and global inbound rate limits suppress excessive traffic, old duplicate requests are ignored, and simultaneous local lookups for the same character are merged. Outgoing work remains queued and throttled. Guild discovery acknowledgments are sampled to avoid a reply storm; incoming peer introductions are never treated as verified votes. **Votes themselves are NEVER copied as authoritative data through the network.** Every counting vote must be returned by that reviewer's own online client directly to the original requester. A query yields an average of *reachable reviewer replies*, not an authoritative worldwide rating.
 
-Rating responses include score, revision, author-submitted date and a has-comment flag. Written comments are fetched separately through direct whispers using only `C_ChatInfo.SendAddonMessageLogged`. If the logged API is absent, comments are not sent (never silently downgraded to ordinary addon messages). Total comment bytes are limited to 160. The active vote cache has a freshness lifetime of 15 minutes; a new lookup replaces that sample instead of retaining disconnected old votes. The last average persists as a clearly marked stale snapshot.
+Rating responses include score, revision, author-submitted date and a has-comment flag. Written comments are fetched separately through direct whispers using only `C_ChatInfo.SendAddonMessageLogged`. If the logged API is absent, comments are not sent (never silently downgraded to ordinary addon messages). Total comment bytes are limited to 160. The active vote cache has a freshness lifetime of 15 minutes; a new lookup replaces that sample instead of retaining disconnected old votes. **A new 15-second lookup may initially display an old cached score marked stale**. The internal protocol change means both players must update to the latest Rate Me! v1 build to communicate. `/rateme netstats` shows local, session-only message/lookup/drop counters for diagnosing high-traffic conditions. The last average persists as a clearly marked stale snapshot.
 
 ## Security and limitations
 
