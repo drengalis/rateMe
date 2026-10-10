@@ -1,4 +1,4 @@
-local A = {protocol='2',prefix='RATEME2',myName='Me-Realm',myFaction='Alliance',myGuid='Player-123-456',CACHE_SECONDS=900,QUERY_SECONDS=15,MAX_PENDING=5,MAX_COMMENT=160}
+local A = {protocol='1',prefix='RATEME',myName='Me-Realm',myFaction='Alliance',myGuid='Player-123-456',CACHE_SECONDS=900,QUERY_SECONDS=15,MAX_PENDING=5,MAX_COMMENT=160}
 local t, events = 0, {}
 local function schedule(delay,fn) events[#events+1]={at=t+delay,fn=fn} end
 C_Timer={After=schedule,NewTicker=function()end}
@@ -62,17 +62,18 @@ for i=2,102 do A:HandleRating({'R',id,target.guid,'4','1','100000','0'},string.f
 assert(A.runtime.requests[id].responseCount==100,'response cap')
 assert(A.netStats.droppedReplyCap==2)
 print('PASS: deduplication, revision tombstone, 100 remote-reviewer cap')
-reset();local packet='Q|lookup-1|Player-ABC-123|Requester-Realm|2';A:OnMessage('RATEME2',packet,'GUILD','Peer001-Realm',false);assert(#A.outbox==0,'guild query must not dispatch')
+reset();local packet='Q|lookup-1|Player-ABC-123|Requester-Realm|2';A:OnMessage('RATEME',packet,'GUILD','Peer001-Realm',false);assert(#A.outbox==0,'guild query must not dispatch')
 A.db.peers[A:Key('Peer001-Realm')]={name='Peer001-Realm',seen=100000}
-A:OnMessage('RATEME2',packet,'WHISPER','Peer001-Realm',false);assert(countQueued('Q')<=3)
-local before=#A.outbox;A:OnMessage('RATEME2',packet,'WHISPER','Peer001-Realm',false);assert(#A.outbox==before)
+A:OnMessage('RATEME',packet,'WHISPER','Peer001-Realm',false);assert(countQueued('Q')<=3)
+local before=#A.outbox;A:OnMessage('RATEME',packet,'WHISPER','Peer001-Realm',false);assert(#A.outbox==before)
 print('PASS: guild query ignored, bounded forwarding, duplicate suppression')
 reset();local accepted=0;for i=1,130 do if A:AllowInbound(string.format('Client%03d-Realm',i)) then accepted=accepted+1 end end
 assert(accepted==120 and A.netStats.droppedGlobal==10)
 advance(21);A:PruneInbound();assert(next(A.inbound)==nil)
 print('PASS: global inbound limit and periodic rate-state pruning')
 reset();assert(A:Query(target));advance(1);id=next(A.runtime.requests)
-assert(A:QueueSend('H|2','GUILD'));assert(A:QueueSend('H|2','PARTY'))
-assert(not A:OnMessage('RATEME','Q|x|Player-ABC-123|Me-Realm|2','WHISPER','Other-Realm',false))
+assert(A:QueueSend('H|1','GUILD'));assert(A:QueueSend('H|1','PARTY'))
+assert(not A:OnMessage('RATEME2','Q|x|Player-ABC-123|Me-Realm|2','WHISPER','Other-Realm',false))
 assert(A.netStats.querySeeds==3)
-print('PASS: protocol isolation and discovery-only broadcasts')
+assert(A.outbox[1].channel=='WHISPER')
+print('PASS: RATEME prefix and discovery-only broadcasts')

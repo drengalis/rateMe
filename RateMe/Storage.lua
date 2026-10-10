@@ -7,8 +7,8 @@ function A:InitializeStorage()
     if type(db.authored) ~= "table" then db.authored = {} end
     if type(db.recent) ~= "table" then db.recent = {} end
     if type(db.peers) ~= "table" then db.peers = {} end
-    -- Peer addresses from the previous wire protocol must not be treated as
-    -- verified RATEME2 clients. This affects discovery only, not saved ratings.
+    -- When the stored peer marker differs, rediscover contacts; keep saved ratings.
+    -- The addon stays at version 1 with the RATEME prefix during testing.
     if db.peerProtocol ~= self.protocol then
         db.peers = {}
         db.peerProtocol = self.protocol

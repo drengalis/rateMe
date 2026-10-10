@@ -1,6 +1,6 @@
 local _, A = ...
 
-local PREFIX = "RATEME2"
+local PREFIX = "RATEME"
 local MAX_QUEUE = 180
 local MAX_HOPS = 2
 local MAX_FANOUT = 3

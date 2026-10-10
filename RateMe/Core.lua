@@ -3,8 +3,8 @@ local addonName, A = ...
 A.name = addonName
 A.title = "Rate Me!"
 A.version = "1"
-A.protocol = "2"
-A.prefix = "RATEME2"
+A.protocol = "1"
+A.prefix = "RATEME"
 -- Bundled textures avoid missing Unicode star glyphs in WoW UI fonts.
 A.STAR_FULL_TEXTURE = "Interface\\AddOns\\RateMe\\Media\\StarFull.tga"
 A.STAR_EMPTY_TEXTURE = "Interface\\AddOns\\RateMe\\Media\\StarEmpty.tga"
