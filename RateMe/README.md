@@ -149,8 +149,50 @@ as existing Rate Me! windows. In-game testing on Forever is still required.
 
 ### Settings layout (local preview)
 
-The Settings tab groups its controls into Alerts, Highlights, Post-Party Ratings, Comment Safety, and Minimap. Dependent options are indented and dim when their parent feature is disabled. Checkbox text explains each action, with no additional help icons or subtitles under the section headings. Preferences save immediately as before.
+The Settings tab groups its controls into My Ratings, Alerts, Highlights, Post-Party Ratings, Comment Safety, and Minimap. Dependent options are indented and dim when their parent feature is disabled. Checkbox text explains each action, with no additional help icons or subtitles under the section headings. Preferences save immediately as before.
 
 The rating editor offers a multiline comment field with a visible vertical scrollbar (mouse wheel, arrow buttons, or draggable thumb when text overflows), with the byte counter directly underneath.
 
 The minimap shortcut uses a circular gold-star button. Left-click to toggle the main window; left-drag to reposition it.
+
+### Backward compatibility of peer messages and preferences
+
+The **addon version** (`1`), legacy **discovery marker** (`A.protocol = "1"`),
+`RATEME` message prefix, and **saved preference schema** are independent. A future
+addon release does **not** require every player to upgrade simultaneously:
+
+- `H|1`, `A|1`, `P|...`, and the original `Q`, `R`, `C?`, and logged `C` packets
+  retain their exact v1 layout. Do not add fields to, reorder, or reinterpret
+  these legacy packet types. If a recipient has not explicitly advertised a
+  newer codec, the sender uses the original v1 format. Queries can traverse
+  mixed-version networks and replies to their original sender negotiate
+  independently; the common `RATEME` prefix must be retained.
+- Higher wire versions are separate codecs registered using
+  `A:RegisterWireCodec(number, encode, decode)` in `Network.lua`. Codecs are
+  opt-in and must project decoded content to the **validated v1-shaped packet**
+  consumed by existing handlers. Following legacy peer discovery, modern peers
+  exchange `K|1|1,2,...` in WHISPER; only a peer advertising a mutually
+  supported higher version receives `X|version|body`. Legacy clients ignore
+  the new `K`/`X` types and continue sending/receiving v1. Unrecognized,
+  unsolicited, or malformed enhanced packets are dropped without corrupting
+  ratings. Capability state is runtime-only, reset on login. No higher codec is
+  registered in the current release: **all current rating traffic remains v1**.
+- Comments must still arrive directly on `CHAT_MSG_ADDON_LOGGED`. Keep the
+  exact received signed packet for report evidence and the validated canonical
+  comment separately if a future codec changes its representation. Never send
+  a written review over the unlogged transport.
+- Settings are stored under `RateMeDB.settings` and versioned independently by
+  `RateMeDB.settingsSchema` (absent on old installations means `1`). For a
+  future layout change, increment `A.SETTINGS_SCHEMA_VERSION` and register
+  **every consecutive** upgrade via `A:RegisterSettingsMigration(version, fn)`.
+  Migrations operate on a copy, preserve unknown fields, and commit only after
+  every step succeeds. Do not reuse a prior setting's key with a new meaning
+  without an explicit migration. If the saved schema is newer than the
+  running addon, or an upgrade fails, the older code uses a runtime-only
+  settings projection and does not overwrite the saved preference table or
+  its version. Saved ratings and lookup records remain available. The root
+  data-schema and peer discovery marker must not be bumped for settings-only
+  changes.
+
+Run `tests/compatibility_tests.lua` with the existing regression suite when
+modifying any wire format, discovery, report evidence, or preference schema.

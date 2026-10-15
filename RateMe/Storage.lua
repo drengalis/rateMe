@@ -1,9 +1,59 @@
 local _, A = ...
 
+-- The preference schema is independent of the addon version, root data schema
+-- and peer wire format. Existing unversioned preferences are schema 1.
+-- Future upgrades must be consecutive and additive; never reuse an old key with
+-- a different meaning without explicitly migrating it.
+A.SETTINGS_SCHEMA_VERSION = 1
+A.settingsMigrations = A.settingsMigrations or {}
+function A:RegisterSettingsMigration(version, migration)
+    if type(version) ~= "number" or version ~= math.floor(version) or version < 2
+        or type(migration) ~= "function" then return false end
+    if self.settingsMigrations[version] then return false end -- no replacing a published migration
+    self.settingsMigrations[version] = migration
+    return true
+end
+local function copySaved(value, seen)
+    if type(value) ~= "table" then return value end
+    seen = seen or {}
+    if seen[value] then return seen[value] end
+    local result = {}
+    seen[value] = result
+    for key, item in pairs(value) do result[copySaved(key, seen)] = copySaved(item, seen) end
+    return result
+end
+function A:MigrateSettings(db)
+    local stored = tonumber(db.settingsSchema)
+    if not stored or stored ~= math.floor(stored) or stored < 1 then stored = 1 end
+    if stored > self.SETTINGS_SCHEMA_VERSION then
+        -- A downgraded addon can still read the known preferences and save
+        -- ratings, but MUST NOT overwrite a newer installation's settings.
+        return false, "future"
+    end
+    if stored == self.SETTINGS_SCHEMA_VERSION then
+        db.settingsSchema = stored
+        return true
+    end
+    -- Apply to a detached copy and commit only when EVERY migration succeeds.
+    -- This preserves unknown fields and prevents partial migration on failure.
+    local draft = copySaved(db.settings)
+    for version = stored + 1, self.SETTINGS_SCHEMA_VERSION do
+        local migration = self.settingsMigrations[version]
+        if type(migration) ~= "function" then return false, "missing migration " .. version end
+        -- The migration receives snapshots only. It cannot partially mutate
+        -- the live SavedVariables by changing the metadata argument.
+        local ok, result = pcall(migration, draft, copySaved(db))
+        if not ok or result == false then return false, "migration failed " .. version end
+    end
+    db.settings = draft
+    db.settingsSchema = self.SETTINGS_SCHEMA_VERSION
+    return true
+end
+
 function A:InitializeStorage()
     if type(RateMeDB) ~= "table" then RateMeDB = {} end
     local db = RateMeDB
-    db.schema = 1
+    if type(db.schema) ~= "number" or db.schema < 1 then db.schema = 1 end
     if type(db.authored) ~= "table" then db.authored = {} end
     if type(db.recent) ~= "table" then db.recent = {} end
     if type(db.peers) ~= "table" then db.peers = {} end
@@ -15,6 +65,22 @@ function A:InitializeStorage()
     end
     if type(db.settings) ~= "table" then db.settings = {} end
     if type(db.ignored) ~= "table" then db.ignored = {} end
+    local migrated, reason = self:MigrateSettings(db)
+    if not migrated then
+        -- An older client, absent migration or failed migration must NEVER
+        -- normalize preferences back into the persistent future/old schema.
+        -- Continue with runtime-only settings, but keep ratings and lookups
+        -- linked to the original SavedVariables tables.
+        local runtimeDB = {}
+        for key, value in pairs(db) do runtimeDB[key] = value end
+        runtimeDB.settings = copySaved(db.settings)
+        db = runtimeDB
+        self.settingsFutureSchema = reason == "future"
+        self.settingsMigrationError = reason ~= "future" and reason or nil
+        if reason ~= "future" then
+            self:Log("Settings migration was not applied (" .. reason .. "); saved preferences kept unchanged.")
+        end
+    end
     -- Retire the previous local profanity dictionary; keep the user's hide preference.
     db.settings.filterComments = nil
     if type(db.settings.hideCommentsByDefault) ~= "boolean" then db.settings.hideCommentsByDefault = false end
@@ -63,7 +129,7 @@ function A:InitializeStorage()
     end
     db.settings.lowRatingThreshold = math.max(1, math.min(5,
         math.floor(db.settings.lowRatingThreshold * 2 + 0.5) / 2))
-    A.db = db
+    self.db = db
     if type(db.authored[self:Key(self.myName)]) ~= "table" then
         db.authored[self:Key(self.myName)] = {}
     end

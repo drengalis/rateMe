@@ -267,3 +267,10 @@ Offline tests: `tests/editor_multiline_tests.lua`, `tests/network_tests.lua`, an
 8. Enter two-line comments and scroll them within the visible comment box. Newlines survive saved comments and logged transport; the 160-byte limit counts UTF-8 bytes.
 
 All rendering, WoW UI template metrics, game timestamps and nameplate positioning require a real WoW Forever client check.
+
+
+## v1 rolling-upgrade compatibility
+- Run `tests/backward_compatibility_tests.lua` against the upgraded source.
+- A newer client must accept legacy v1 Q/R packets and respond using the unchanged v1 layout to a peer that has not advertised capabilities.
+- Newer codecs must be selected per peer only after K|1|... capability negotiation. Missing/unknown codecs fall back to v1 or are ignored.
+- Settings migrate on a copy, preserve unknown keys, and retain the persisted schema/settings unchanged when a migration fails or a future schema is present.

@@ -49,7 +49,14 @@ function A:GetCommentReportEvidence(targetGUID, reviewer, vote)
         or self:Key(author) == self:Key(self.myName) then return nil end
     -- The source includes the exact logged packet accepted for this review.
     -- Check its target, revision and text before using it as report evidence.
-    local id, guid, revision, comment = source.payload:match("^C|([^|]+)|([^|]+)|([^|]+)|(.+)$")
+    -- For legacy packets, the logged bytes are the canonical message. For a
+    -- negotiated codec, reception separately stores its validated v1-shaped
+    -- projection while preserving the actual logged packet as report evidence.
+    local canonical = source.canonicalPayload or source.payload
+    if source.payload:sub(1, 2) == "X|" and (type(source.canonicalPayload) ~= "string"
+        or source.canonicalPayload:sub(1, 2) ~= "C|") then return nil end
+    if source.payload:sub(1, 2) ~= "X|" and canonical ~= source.payload then return nil end
+    local id, guid, revision, comment = canonical:match("^C|([^|]+)|([^|]+)|([^|]+)|(.+)$")
     if not id or guid ~= targetGUID or tonumber(revision) ~= vote.rev
         or comment ~= vote.comment then return nil end
     return {author = author, targetGUID = targetGUID, receivedAt = source.receivedAt,

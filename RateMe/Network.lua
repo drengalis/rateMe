@@ -48,6 +48,98 @@ local function fields(value, limit)
     out[#out + 1] = value:sub(start)
     return out
 end
+-- Wire compatibility is separate from the addon and SavedVariables versions.
+-- All v1 packets stay byte-for-byte unchanged on RATEME. New formats use the
+-- X|version|payload envelope only after both peers advertise that codec using
+-- K|1|comma-separated-versions. Old clients safely ignore K and X packets.
+A.wireCodecs = A.wireCodecs or {}
+function A:RegisterWireCodec(version, encode, decode)
+    if type(version) ~= "number" or version ~= math.floor(version) or version < 2 or version > 16
+        or type(encode) ~= "function" or type(decode) ~= "function" then return false end
+    if self.wireCodecs[version] then return false end -- never redefine a published format
+    self.wireCodecs[version] = {encode = encode, decode = decode}
+    return true
+end
+function A:SupportedWireVersions()
+    local versions = {1}
+    for version in pairs(self.wireCodecs) do versions[#versions + 1] = version end
+    table.sort(versions)
+    return versions
+end
+function A:SendCapabilities(peer)
+    local key = self:Key(peer)
+    if not key or not self.db.peers[key] then return false end
+    self.wireAdvertised = self.wireAdvertised or {}
+    if self.wireAdvertised[key] and self:Now() - self.wireAdvertised[key] < 120 then return false end
+    local versions = self:SupportedWireVersions()
+    if #versions == 1 then return false end -- no extra packets until a new codec exists
+    local packet = "K|1|" .. table.concat(versions, ",")
+    if not self:QueueSend(packet, "WHISPER", peer) then return false end
+    self.wireAdvertised[key] = self:Now()
+    return true
+end
+function A:HandleCapabilities(message, sender)
+    local key = self:Key(sender)
+    if not key or not self.db.peers[key] then return end
+    local marker, list = message:match("^K|([^|]+)|([%d,]+)$")
+    if marker ~= "1" or not list or #list > 48 then return end
+    local advertised, count = {}, 0
+    for item in list:gmatch("[^,]+") do
+        local version = tonumber(item)
+        if not version or version ~= math.floor(version) or version < 1 or version > 16
+            or advertised[version] then return end
+        advertised[version] = true
+        count = count + 1
+        if count > 16 then return end
+    end
+    if count == 0 or not advertised[1] or list:sub(1, 1) == ","
+        or list:sub(-1) == "," or list:find(",,", 1, true) then return end
+    self.wirePeerCapabilities = self.wirePeerCapabilities or {}
+    self.wirePeerCapabilities[key] = advertised
+    return true
+end
+function A:WireVersionForPeer(peer)
+    local caps = self.wirePeerCapabilities and self.wirePeerCapabilities[self:Key(peer)]
+    if not caps then return 1 end
+    local selected = 1
+    for version in pairs(self.wireCodecs) do
+        if caps[version] and version > selected then selected = version end
+    end
+    return selected
+end
+function A:EncodePacket(tag, values, peer)
+    -- The first-generation wire representation is never revised; append new
+    -- fields only inside a negotiated, independently encoded higher version.
+    local parts = {tag}
+    for i = 1, #values do parts[#parts + 1] = tostring(values[i]) end
+    local legacy = table.concat(parts, "|")
+    local version = peer and self:WireVersionForPeer(peer) or 1
+    if version > 1 then
+        local codec = self.wireCodecs[version]
+        local ok, body = pcall(codec.encode, tag, values)
+        if ok and type(body) == "string" and #body > 0 then
+            local packet = "X|" .. version .. "|" .. body
+            if #packet <= 255 then return packet end
+        end
+        -- A codec failure falls back to the known-compatible legacy format.
+    end
+    return legacy
+end
+function A:DecodePacket(message, sender)
+    if message:sub(1, 2) ~= "X|" then return message:match("^([^|]+)"), message end
+    local number, body = message:match("^X|(%d+)|(.+)$")
+    local version = tonumber(number)
+    if not version or version < 2 or version > 16 or tostring(version) ~= number then return nil end
+    local caps = self.wirePeerCapabilities and self.wirePeerCapabilities[self:Key(sender)]
+    local codec = self.wireCodecs[version]
+    if not codec or not caps or not caps[version] or not self.db.peers[self:Key(sender)] then return nil end
+    local ok, tag, legacy = pcall(codec.decode, body)
+    if not ok or (tag ~= "Q" and tag ~= "R" and tag ~= "C?" and tag ~= "C")
+        or type(legacy) ~= "string" or legacy:match("^([^|]+)") ~= tag
+        or #legacy > 255 then return nil end
+    return tag, legacy
+end
+
 local function validId(id)
     return type(id) == "string" and #id >= 2 and #id <= 25 and id:match("^[%w%-]+$") ~= nil
 end
@@ -236,9 +328,9 @@ function A:SendQueryWave(id, maximum)
     local remaining = math.min(maximum, MAX_QUERY_SEEDS - request.seedCount)
     local selected = self:SelectQueryPeers(id .. ":" .. request.seedCount,
         nil, self.myName, remaining, request.seeded)
-    local packet = table.concat({"Q", id, request.guid, self.myName, tostring(MAX_HOPS)}, "|")
     local sent = 0
     for _, peer in ipairs(selected) do
+        local packet = self:EncodePacket("Q", {id, request.guid, self.myName, MAX_HOPS}, peer)
         if self:QueueSend(packet, "WHISPER", peer) then
             request.seeded[self:Key(peer)] = true
             request.seedCount = request.seedCount + 1
@@ -354,7 +446,7 @@ function A:RequestComments(guid)
             local id = self:NewRequestID()
             self.runtime.comments[id] = {guid = guid, reviewer = key, expires = t + 15}
             vote.commentRequested = t
-            if self:QueueSend(table.concat({"C?", id, guid}, "|"), "WHISPER", vote.sender) then
+            if self:QueueSend(self:EncodePacket("C?", {id, guid}, vote.sender), "WHISPER", vote.sender) then
                 sent = sent + 1
             else
                 self.runtime.comments[id] = nil
@@ -388,13 +480,13 @@ function A:HandleQuery(args, sender)
     if record and record.faction == self.myFaction and self:Key(origin) ~= self:Key(self.myName) then
         local value = record.removed and 0 or tonumber(record.score)
         if value and value >= 0 and value <= 5 then
-            self:QueueSend(table.concat({"R", id, guid, value, record.rev or 1,
-                record.date or self:Stamp(), (record.comment and #record.comment > 0) and 1 or 0}, "|"), "WHISPER", origin)
+            self:QueueSend(self:EncodePacket("R", {id, guid, value, record.rev or 1,
+                record.date or self:Stamp(), (record.comment and #record.comment > 0) and 1 or 0}, origin), "WHISPER", origin)
         end
     end
     if hops <= 0 then return end
-    local packet = table.concat({"Q", id, guid, origin, hops - 1}, "|")
     for _, peer in ipairs(self:SelectQueryPeers(id, sender, origin, MAX_FANOUT)) do
+        local packet = self:EncodePacket("Q", {id, guid, origin, hops - 1}, peer)
         if self:QueueSend(packet, "WHISPER", peer) then self:BumpNetworkStat("queryRelays") end
     end
 end
@@ -439,11 +531,12 @@ function A:HandleCommentRequest(args, sender)
         or not self:UnderInboundLimit(sender, "C?", 4, 30) then return end
     local record = self:GetOwnRating(args[3])
     if not record or record.removed or not record.comment or record.comment == "" then return end
-    local message = table.concat({"C", args[2], args[3], record.rev or 1, self:SanitizeComment(record.comment)}, "|")
+    local message = self:EncodePacket("C", {args[2], args[3], record.rev or 1,
+        self:SanitizeComment(record.comment)}, sender)
     self:QueueSend(message, "WHISPER", sender, true)
 end
 
-function A:HandleComment(args, sender, logged, rawMessage)
+function A:HandleComment(args, sender, logged, rawMessage, canonicalMessage)
     if #args ~= 5 or not logged then return end
     local id, guid, revision = args[2], args[3], tonumber(args[4])
     local pending = id and self.runtime.comments[id]
@@ -470,7 +563,9 @@ function A:HandleComment(args, sender, logged, rawMessage)
     vote.commentSource = {
         sender = author, targetGUID = guid, revision = revision,
         receivedAt = self:Stamp(), logged = true,
-        payload = rawMessage,
+        -- Preserve the actual logged packet for reporting; the canonical form
+        -- was validated by the codec at receipt, never claimed by its sender.
+        payload = rawMessage, canonicalPayload = canonicalMessage,
     }
     self:NotifyUI()
 end
@@ -481,7 +576,10 @@ function A:OnMessage(prefix, message, channel, sender, logged)
     if not canonical or self:Key(canonical) == self:Key(self.myName) then return end
     if type(channel) ~= "string" then return end
     if not self:AllowInbound(canonical) then return end
-    local tag = message:match("^([^|]+)")
+    local rawMessage = message
+    local tag, decoded = self:DecodePacket(message, canonical)
+    if not tag then return end
+    message = decoded
     if logged and tag ~= "C" then return end
     if not logged and tag == "C" then return end
     if tag == "H" and message == "H|" .. self.protocol
@@ -490,6 +588,9 @@ function A:OnMessage(prefix, message, channel, sender, logged)
         local key = self:Key(canonical)
         local prior = self.db.peers[key]
         local recently = prior and prior.hello and self:Stamp() - prior.hello < 120
+        -- Fresh v1 discovery may be a peer that downgraded or restarted;
+        -- require it to advertise higher capabilities again before upgrading.
+        if self.wirePeerCapabilities then self.wirePeerCapabilities[key] = nil end
         self:RememberPeer(canonical)
         if not recently then
             self.db.peers[key].hello = self:Stamp()
@@ -500,6 +601,7 @@ function A:OnMessage(prefix, message, channel, sender, logged)
             if respond then
                 C_Timer.After(jitter(1.5), function()
                     self:QueueSend("A|" .. self.protocol, "WHISPER", canonical)
+                    self:SendCapabilities(canonical)
                     if channel == "WHISPER" then
                         local names = self:PeerNames(canonical, 2)
                         if #names > 0 then
@@ -510,7 +612,13 @@ function A:OnMessage(prefix, message, channel, sender, logged)
             end
         end
     elseif tag == "A" and channel == "WHISPER" and message == "A|" .. self.protocol then
+        if self.wirePeerCapabilities then self.wirePeerCapabilities[self:Key(canonical)] = nil end
         self:RememberPeer(canonical)
+        self:SendCapabilities(canonical)
+    elseif tag == "K" and channel == "WHISPER" then
+        -- A direct, validated capability advertisement prompts one bounded
+        -- reply if ours has not been sent. No upgrade is required for v1 peers.
+        if self:HandleCapabilities(message, canonical) then self:SendCapabilities(canonical) end
     elseif tag == "P" and channel == "WHISPER" then
         -- Introductions aren't votes or verified identities. Probe independently.
         if not self.db.peers[self:Key(canonical)] then return end
@@ -535,13 +643,14 @@ function A:OnMessage(prefix, message, channel, sender, logged)
     elseif tag == "C?" and channel == "WHISPER" then
         self:HandleCommentRequest(fields(message, 3), canonical)
     elseif tag == "C" and channel == "WHISPER" then
-        self:HandleComment(fields(message, 5), canonical, logged, message)
+        self:HandleComment(fields(message, 5), canonical, logged, rawMessage, message)
     end
 end
 
 function A:InitializeNetwork()
     self.outbox, self.nextSend, self.counter = {}, 0, 0
     self.netStats, self.inbound = {}, {}
+    self.wirePeerCapabilities, self.wireAdvertised = {}, {}
     if not C_ChatInfo or not C_ChatInfo.RegisterAddonMessagePrefix or not C_ChatInfo.SendAddonMessage then
         self:Log("Addon messaging API not available. Local ratings still work.")
         return
