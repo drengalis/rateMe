@@ -21,7 +21,7 @@ function A:Stamp()return 100000+t end
 function A:CleanName(n) if type(n)~='string' or #n < 2 or n:find('[%s|%c]') then return nil end; if not n:find('-',1,true) then return n..'-Realm' end;return n end
 function A:Key(n) local s=self:CleanName(n);return s and s:lower() end
 function A:ValidateStoredTarget(x) return type(x)=='table' and x.guid=='Player-ABC-123' end
-function A:RememberTarget(x) self.db.recent[x.guid]=self.db.recent[x.guid] or {name=x.name,guid=x.guid} end
+function A:RememberTarget(x) self.data.recent[x.guid]=self.data.recent[x.guid] or {name=x.name,guid=x.guid} end
 function A:GetOwnRating(g) return self.own end
 function A:NotifyUI() end
 function A:RefreshTooltip() end
@@ -33,11 +33,16 @@ function A:GetSummary(g)
 end
 function A:Log() end
 function A:Debug() end
+function A:DebugPacket() end
+function A:DisplayName(name) return name end
+local S = dofile('tests/load_data_addon.lua')
+S:Bind(A)
+assert(loadfile("RateMe/Payload.lua"))("RateMe",A)
 local chunk=assert(loadfile('RateMe/Network.lua'));chunk('RateMe',A)
 local target={guid='Player-ABC-123',name='Target-Realm',faction='Alliance'}
 local function reset()
- t=0;events={};send={};A.runtime={requests={},cache={},seen={},comments={}};A.db={peers={},recent={},ignored={}};A.own=nil;A.outbox={};A.netStats={};A.inbound={};A.nextSend=0;A.counter=0;A.lastHello=0;A.globalInbound=nil
- for i=1,60 do local name=string.format('Peer%03d-Realm',i); A.db.peers[A:Key(name)]={name=name,seen=100000} end
+ t=0;events={};send={};A.runtime={requests={},cache={},seen={},comments={}};A.db={ignored={},authored={[A:Key(A.myName)]={}},settings={},peers={},recent={}};A.data=A.db;A.own=nil;A.outbox={};A.netStats={};A.inbound={};A.nextSend=0;A.counter=0;A.lastHello=0;A.globalInbound=nil
+ for i=1,60 do local name=string.format('Peer%03d-Realm',i); A.data.peers[A:Key(name)]={name=name,seen=100000} end
 end
 local function countQueued(tag) local n=0;for _,v in ipairs(A.outbox)do if v.message:match('^'..tag..'|') then n=n+1;assert(v.channel=='WHISPER') end end;return n end
 local function countActive() local n=0;for _ in pairs(A.runtime.requests)do n=n+1 end;return n end
@@ -63,7 +68,7 @@ assert(A.runtime.requests[id].responseCount==100,'response cap')
 assert(A.netStats.droppedReplyCap==2)
 print('PASS: deduplication, revision tombstone, 100 remote-reviewer cap')
 reset();local packet='Q|lookup-1|Player-ABC-123|Requester-Realm|2';A:OnMessage('RATEME',packet,'GUILD','Peer001-Realm',false);assert(#A.outbox==0,'guild query must not dispatch')
-A.db.peers[A:Key('Peer001-Realm')]={name='Peer001-Realm',seen=100000}
+A.data.peers[A:Key('Peer001-Realm')]={name='Peer001-Realm',seen=100000}
 A:OnMessage('RATEME',packet,'WHISPER','Peer001-Realm',false);assert(countQueued('Q')<=3)
 local before=#A.outbox;A:OnMessage('RATEME',packet,'WHISPER','Peer001-Realm',false);assert(#A.outbox==before)
 print('PASS: guild query ignored, bounded forwarding, duplicate suppression')

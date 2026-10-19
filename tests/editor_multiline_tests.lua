@@ -89,6 +89,7 @@ f.comment.scripts.OnEscapePressed(f.comment)
 assert(f.comment.cleared and not f:IsShown())
 print('PASS: multiline editor is clipped and scrollable; counter is directly below; Enter, byte cap, caret, Escape')
 -- Storage should keep intentional line breaks and still strip pipes/control chars.
+local S = dofile('tests/load_data_addon.lua')
 local storage=assert(loadfile('RateMe/Storage.lua'));storage('RateMe', A)
 assert(A:SanitizeComment('First\r\nSecond|T\9ok')=='First\nSecondT ok')
 print('PASS: newline-preserving comment sanitization and WoW formatting protection')

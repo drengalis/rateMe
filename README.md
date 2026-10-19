@@ -10,7 +10,7 @@ Everything runs inside WoW. You do **not** need an account, website, or external
 ## Installation
 
 1. Download this repository using **Code → Download ZIP**, then extract it.
-2. Copy the **\`RateMe\` folder inside the download** to your WoW Forever \`Interface/AddOns\` directory. Keep its \`Media\` subfolder.
+2. Copy both the **\`RateMe\` and **\`RateMeData\` folders inside the download** to your WoW Forever \`Interface/AddOns\` directory. Keep the `RateMe/Media` subfolder.
 3. Confirm your folder structure looks like this (the game installation directory may vary):
 
    \`\`\`text
@@ -18,16 +18,19 @@ Everything runs inside WoW. You do **not** need an account, website, or external
    └── _classic_beta_/
        └── Interface/
            └── AddOns/
-               └── RateMe/
-                   ├── RateMe.toc
-                   ├── Core.lua
-                   └── Media/
+               ├── RateMe/
+               │   ├── RateMe.toc
+               │   ├── Core.lua
+               │   └── Media/
+               └── RateMeData/
+                   ├── RateMeData.toc
+                   └── Store.lua
    \`\`\`
 
-4. Enable **Rate Me!** in the character-selection AddOns menu, then enter the game.
+4. Enable **Rate Me!** and its required **Rate Me! Data** companion in the character-selection AddOns menu, then enter the game.
 5. Click the gold star on your minimap, or type **\`/rateme\`**.
 
-When updating, replace the installed \`RateMe\` addon folder. Your own ratings and preferences are stored separately in WoW SavedVariables and are intended to be preserved. Reload the game UI **once after replacing addon files**; you do **not** need to reload after rating someone or changing settings.
+When updating, replace both installed \`RateMe\` and \`RateMeData\` addon folders. The companion addon owns all persistent records in the `RateMeDB` SavedVariables table, saved by WoW in `SavedVariables/RateMeData.lua`. This unreleased storage layout starts with a fresh database and has no import or migration from earlier previews. Reload the game UI **once after replacing addon files**; you do **not** need to reload after rating someone or changing settings.
 
 ## Get started
 
@@ -140,9 +143,9 @@ Rate Me! is intended to be a helpful personal/community reference, not a definit
 
 ## Troubleshooting
 
-**I don't see Rate Me! in the AddOns list.** Make sure the installed path is \`Interface/AddOns/RateMe/RateMe.toc\`, rather than an extra nested \`rateMe-main/RateMe\` folder. Keep the \`Media\` files with the addon.
+**I don't see Rate Me! in the AddOns list.** Make sure both \`Interface/AddOns/RateMe/RateMe.toc\` and \`Interface/AddOns/RateMeData/RateMeData.toc\` exist, rather than an extra nested \`rateMe-main/RateMe\` folder. Keep the \`Media\` files with the addon.
 
-**The stars show empty squares or missing artwork.** Reinstall the whole \`RateMe\` folder, including \`Media\`. Rate Me! uses bundled star textures rather than Unicode star characters.
+**The stars show empty squares or missing artwork.** Reinstall both addon folders, including the whole \`RateMe\` folder, including \`Media\`. Rate Me! uses bundled star textures rather than Unicode star characters.
 
 **A player has no community rating.** This can simply mean no reachable online reviewers have replied. Your personal ratings still work.
 
@@ -155,3 +158,7 @@ Rate Me! is intended to be a helpful personal/community reference, not a definit
 ---
 
 *Rate Me! is a community addon. Version 1 is currently a beta; actual WoW Forever client and multi-client compatibility testing is ongoing.*
+
+## Data companion
+
+`RateMeData` is a required companion addon. It owns the single account-wide `RateMeDB` SavedVariables table, personal ratings, preferences, community history, peers, reviewer blocks, and data classes. `RateMe` declares `## Dependencies: RateMeData` and does not declare a separate SavedVariables table. Both addon folders must be installed side by side. The storage design is unreleased and intentionally has no legacy import or migration code.

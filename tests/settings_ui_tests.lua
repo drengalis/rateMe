@@ -6,6 +6,7 @@ local A = {db={settings={lowRatingAlerts=false,lowRatingPersonal=false,lowRating
  ratingHighlightsPersonal=false,ratingHighlightsCommunity=true,partyReviewPrompt=true,
  hideCommentsByDefault=false,minimapVisible=true,allCharacters=false}}}
 local counters={alert=0,highlights=0,minimap=0}
+function A:SetSetting(key,value) self.db.settings[key]=value;return true end
 function A:OnAlertSettingsChanged() counters.alert=counters.alert+1 end
 function A:OnHighlightSettingsChanged() counters.highlights=counters.highlights+1 end
 function A:SetMinimapVisible(v) counters.minimap=counters.minimap+1;self.db.settings.minimapVisible=v end
@@ -58,15 +59,15 @@ local chunk=assert(loadfile('RateMe/UI.lua'))
 chunk('RateMe', A)
 A:CreateSettingsPanel()
 local p=A.main.settingsPanel.content
-assert(p.height==1175 and p.width==699)
+assert(p.height==1285 and p.width==699)
 assert(A.main.settingsPanel.scrollChild==p)
 assert(p.enabled and p.alertPersonal and p.alertCommunity and p.threshold and p.personalThreshold)
-assert(p.highlights and p.highlightGlow and p.highlightBadge and p.highlightPersonal and p.highlightCommunity and p.minimapVisible and p.partyReviewPrompt and p.hideCommentsByDefault and p.allCharacters)
+assert(p.highlights and p.highlightGlow and p.highlightBadge and p.highlightPersonal and p.highlightCommunity and p.minimapVisible and p.partyReviewPrompt and p.hideCommentsByDefault and p.allCharacters and p.debug)
 local cards={}
 for _,o in ipairs(objects) do
  if o.parent==p and o.bgColor then cards[#cards+1]=o end
 end
-assert(#cards==6,'Expected six distinct sections, got '..#cards)
+assert(#cards==7,'Expected seven distinct sections, got '..#cards)
 local previousBottom=0
 for _,card in ipairs(cards) do
  assert(card.bgColor[4]==1,'Panels must be opaque')
@@ -93,7 +94,11 @@ end
 A:DrawSettings()
 assert(p.enabled:GetChecked()==false and p.alertPersonal.enabled==false and p.personalThreshold.enabled==false)
 assert(p.highlights:GetChecked()==false and p.highlightGlow.enabled==false and p.highlightBadge.enabled==false and p.highlightPersonal.enabled==false)
-assert(p.partyReviewPrompt:GetChecked() and p.minimapVisible:GetChecked() and not p.allCharacters:GetChecked())
+assert(p.partyReviewPrompt:GetChecked() and p.minimapVisible:GetChecked() and not p.allCharacters:GetChecked() and not p.debug:GetChecked())
+p.debug:SetChecked(true);p.debug.scripts.OnClick(p.debug)
+assert(A.db.settings.debug==true and p.debug:GetChecked())
+p.debug:SetChecked(false);p.debug.scripts.OnClick(p.debug)
+assert(A.db.settings.debug==false and not p.debug:GetChecked())
 p.allCharacters:SetChecked(true);p.allCharacters.scripts.OnClick(p.allCharacters)
 assert(A.db.settings.allCharacters and A.main.pages.mine==1, 'All Characters setting did not apply and reset My Ratings pagination')
 p.allCharacters:SetChecked(false);p.allCharacters.scripts.OnClick(p.allCharacters)

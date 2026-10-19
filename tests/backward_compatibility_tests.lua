@@ -2,7 +2,7 @@
 -- Compatibility contract: a v1 client and an upgraded client interoperate.
 local A = {
     myName = "New-Realm", protocol = 1,
-    db = { peers = { ["old-realm"] = { seen = 100 }, ["newpeer-realm"] = { seen = 100 } } },
+    db = {}, data = { peers = { ["old-realm"] = { seen = 100 }, ["newpeer-realm"] = { seen = 100 } } },
     wireCodecs = {}, outbox = {}, nextSend = 0,
 }
 function A:Key(name) return type(name) == "string" and name:lower() or nil end
@@ -10,8 +10,13 @@ function A:CleanName(name) return name end
 function A:Now() return 100 end
 function A:Stamp() return 100 end
 function A:Log() end
+function A:Debug() end
+function A:DebugPacket() end
 function A:AllowInbound() return true end
 local sends = {}
+local S = dofile('tests/load_data_addon.lua')
+S:Bind(A)
+assert(loadfile("RateMe/Payload.lua"))("RateMe", A)
 assert(loadfile("RateMe/Network.lua"))("RateMe", A)
 function A:QueueSend(packet, channel, to, logged)
     sends[#sends + 1] = { packet = packet, channel = channel, to = to, logged = logged }
@@ -64,34 +69,8 @@ assert(sends[#sends].packet == "R|ab12|Player-1-2|5|1|1234|0")
 A:OnMessage("RATEME", "R|ab12|Player-1-2|4|1|1234|0", "WHISPER", "Old-Realm", false)
 assert(observed.response and observed.response.parts[4] == "4")
 
--- Settings are independently versioned, copied transactionally and keep unknown keys.
-assert(loadfile("RateMe/Storage.lua"))("RateMe", A)
-local saved = { settingsSchema = 1, settings = { oldValue = "original", unknownKey = 8 } }
-A.SETTINGS_SCHEMA_VERSION = 2
-assert(A:RegisterSettingsMigration(2, function(settings)
-    settings.newFlag = true
-    settings.oldValue = "migrated"
-end))
-assert(not A:RegisterSettingsMigration(2, function() end))
-local original = saved.settings
-assert(A:MigrateSettings(saved))
-assert(saved.settings ~= original and original.oldValue == "original")
-assert(saved.settingsSchema == 2 and saved.settings.newFlag == true)
-assert(saved.settings.unknownKey == 8 and saved.settings.oldValue == "migrated")
-A.SETTINGS_SCHEMA_VERSION = 3
-local snapshot = saved.settings
-local ok, why = A:MigrateSettings(saved)
-assert(not ok and why == "missing migration 3")
-assert(saved.settings == snapshot and saved.settingsSchema == 2)
-assert(A:RegisterSettingsMigration(3, function(settings)
-    settings.unknownKey = 0
-    error("simulated failed migration")
-end))
-ok, why = A:MigrateSettings(saved)
-assert(not ok and why == "migration failed 3")
-assert(saved.settings == snapshot and saved.settings.unknownKey == 8)
-local future = { settingsSchema = 9, settings = { futureKey = "preserve" } }
-ok, why = A:MigrateSettings(future)
-assert(not ok and why == "future")
-assert(future.settingsSchema == 9 and future.settings.futureKey == "preserve")
+-- Storage schemas are declared separately from the wire protocol. No
+-- migration/import routines are included in the unreleased data addon.
+assert(A.SETTINGS_SCHEMA_VERSION == 1)
+assert(A.RegisterSettingsMigration == nil and A.MigrateSettings == nil)
 print("Backward-compatibility tests passed")

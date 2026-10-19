@@ -238,7 +238,7 @@ function A:OnNameplateAdded(unit)
         if not usable(anchor) then return end
         local okGlow, overlay = pcall(makeGlow, anchor, true)
         if not okGlow or not overlay then
-            self:Debug("Unable to create nameplate glow: " .. tostring(overlay))
+            self:Debug("Could not display a nameplate highlight for this player.")
             return
         end
         entry = {overlay = overlay, anchor = anchor}

@@ -332,7 +332,7 @@ function A:CreateSettingsPanel()
     -- hard-coded 665/640 widths that left a large unused strip on the right.
     -- Match future size changes (including UI-scale changes) automatically.
     local p = CreateFrame("Frame", nil, scroll)
-    p:SetSize(699, 1175) -- six responsive sections, including My Ratings preferences
+    p:SetSize(699, 1285) -- seven responsive sections, including optional debug output
     scroll:SetScrollChild(p)
     scroll.content = p
     scroll:SetScript("OnSizeChanged", function(_, width)
@@ -390,7 +390,7 @@ function A:CreateSettingsPanel()
         local textWidth = caption.GetStringWidth and caption:GetStringWidth() or (#title * 7)
         caption:SetWidth(math.min(480 - x, math.ceil(textWidth + 5)))
         local function changed(self)
-            A.db.settings[key] = self:GetChecked() and true or false
+            A:SetSetting(key, self:GetChecked() and true or false)
             if onClick then onClick() end
             A:DrawSettings()
         end
@@ -419,7 +419,7 @@ function A:CreateSettingsPanel()
             local rounded = math.max(1, math.min(5, math.floor(number * 2 + 0.5) / 2))
             if math.abs(number - rounded) > 0.001 then self:SetValue(rounded); return end
             if A.db.settings[key] ~= rounded then
-                A.db.settings[key] = rounded
+                A:SetSetting(key, rounded)
                 A:OnAlertSettingsChanged()
             end
             A:DrawSettings()
@@ -503,11 +503,15 @@ function A:CreateSettingsPanel()
         "Left-click: open     Left-drag: move     /rateme: always available", 55, -84, 545)
     miniHint:SetTextColor(unpack(MUTED))
 
+    local diagnostics = section(1176, 90, "Diagnostics")
+    p.debug, p.debugRow, p.debugLabel = checkbox(diagnostics,
+        "debug", "Show rating and peer-to-peer activity in chat (debug)", 19, 51)
+
     -- Preserve original controls/aliases for any current callers or testing.
     for _, name in ipairs({"enabled", "alertPersonal", "alertCommunity", "threshold", "thresholdValue",
         "personalThreshold", "personalThresholdValue", "highlights", "highlightGlow", "highlightBadge",
         "highlightPersonal", "highlightCommunity", "minimapVisible", "partyReviewPrompt", "hideCommentsByDefault",
-        "allCharacters"}) do
+        "allCharacters", "debug"}) do
         scroll[name] = p[name]
     end
     self.main.settingsPanel = scroll
@@ -520,6 +524,7 @@ function A:DrawSettings()
     local p = f.settingsPanel.content
     local settings = self.db.settings
     p.allCharacters:SetChecked(settings.allCharacters)
+    p.debug:SetChecked(settings.debug)
     p.enabled:SetChecked(settings.lowRatingAlerts)
     p.alertPersonal:SetChecked(settings.lowRatingPersonal)
     p.alertCommunity:SetChecked(settings.lowRatingCommunity)
@@ -922,7 +927,7 @@ function A:CreateReviewRow(index)
     end)
     row.block = button(row, "Block", 89, 20, 356, -85, function()
         if not row.reviewer then return end
-        A.db.ignored[row.reviewer] = not A.db.ignored[row.reviewer] or nil
+        A:ToggleReviewerBlock(row.reviewer)
         A:DrawReviews()
     end)
     row.report = button(row, "Report", 90, 20, 452, -85, function()
@@ -1081,13 +1086,13 @@ function A:DragMinimapButtonToCursor()
     if not cursorX or not cursorY or not centerX or not centerY or not scale or scale <= 0 then return end
     local dx, dy = cursorX / scale - centerX, cursorY / scale - centerY
     if dx * dx + dy * dy < 9 then return end
-    self.db.settings.minimapAngle = (math.deg(angleFromPoint(dy, dx)) + 360) % 360
+    self:SetSetting("minimapAngle", (math.deg(angleFromPoint(dy, dx)) + 360) % 360)
     self:PositionMinimapButton()
 end
 
 function A:SetMinimapVisible(visible)
     visible = visible and true or false
-    self.db.settings.minimapVisible = visible
+    self:SetSetting("minimapVisible", visible)
     if self.minimap then self.minimap:SetShown(visible) end
 end
 
@@ -1122,7 +1127,7 @@ function A:CreatePartyReviewWindow()
                         row.dirty = false
                     else
                         failed = failed + 1
-                        A:Debug("Party rating not saved: " .. tostring(err))
+                        A:Debug("Could not save a party rating: " .. tostring(err))
                     end
                 elseif row.comment:GetText() ~= "" then
                     incomplete = incomplete + 1

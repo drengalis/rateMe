@@ -87,13 +87,15 @@ function A:InitializeIntegration()
                 A:Log("No recent party to review. Leave a party first.")
             end
         elseif msg == "debug" then
-            A.db.settings.debug = not A.db.settings.debug
-            A:Log("Debug logging: " .. (A.db.settings.debug and "on" or "off"))
+            A:SetSetting("debug", not A.db.settings.debug)
+            A:DrawSettings() -- Keep the Settings checkbox synchronized with /rateme debug.
+            A:Log(A.db.settings.debug and "Activity details are now shown in your chat window."
+                or "Activity details are now hidden from your chat window.")
         elseif msg == "netstats" then
             A:Log(A:NetworkStatsText())
         elseif msg == "peers" then
             local count = 0
-            for _ in pairs(A.db.peers) do count = count + 1 end
+            for _ in pairs(A.data.peers) do count = count + 1 end
             A:Log(count .. " known peers in directory (not necessarily online).")
         elseif msg == "minimap" then
             A:SetMinimapVisible(not A.db.settings.minimapVisible)

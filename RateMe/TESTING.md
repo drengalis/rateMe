@@ -273,4 +273,11 @@ All rendering, WoW UI template metrics, game timestamps and nameplate positionin
 - Run `tests/backward_compatibility_tests.lua` against the upgraded source.
 - A newer client must accept legacy v1 Q/R packets and respond using the unchanged v1 layout to a peer that has not advertised capabilities.
 - Newer codecs must be selected per peer only after K|1|... capability negotiation. Missing/unknown codecs fall back to v1 or are ignored.
-- Settings migrate on a copy, preserve unknown keys, and retain the persisted schema/settings unchanged when a migration fails or a future schema is present.
+- The unreleased RateMeData schema starts fresh, has no legacy import or migration code, and rejects unfamiliar future schema values without modifying saved data.
+
+## Companion data-addon verification
+
+- Install `RateMe/` and `RateMeData/` side by side; RateMe must load after its required companion.
+- Only `RateMeData` declares `## SavedVariables: RateMeDB`, producing `SavedVariables/RateMeData.lua`.
+- Personal ratings, settings, reviewer blocks, recent community summaries and peer records live in that single table. The main addon's storage is a binding layer only.
+- Run `tests/data_subaddon_tests.lua` and `tests/debug_activity_tests.lua` along with existing network, UI and payload tests. There is no legacy import or schema migration in this unreleased layout.
