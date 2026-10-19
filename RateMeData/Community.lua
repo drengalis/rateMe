@@ -5,7 +5,7 @@ local A = Store.API
 -- Persist data only, never monotonic timers, pending requests or report evidence.
 local function copyVote(v)
     return {sender=v.sender, score=v.score, rev=v.rev, date=v.date,
-        tags=v.tags, verifiedAt=v.verifiedAt}
+        tags=v.tags, verifiedAt=v.verifiedAt, receivedAt=v.receivedAt, via=v.via}
 end
 
 function A:RestoreCommunityLookups()
@@ -34,15 +34,58 @@ function A:SaveCommunityRating(target, reviewer, vote)
         self.db.community[target.guid] = item
     end
     local prior = item.votes[reviewer]
-    if prior and prior.rev > vote.rev then return false end
-    if prior and prior.rev == vote.rev then
+    local priorVerified = prior and self:IsCommunityReviewVerified(prior)
+    -- A direct author can correct an unverified peer copy even at a lower revision.
+    if priorVerified and prior.rev > vote.rev then return false end
+    if priorVerified and prior.rev == vote.rev then
         if prior.score ~= vote.score or prior.date ~= vote.date
-            then return false end
+            or (prior.tags~=nil and vote.tags~=nil and prior.tags~=vote.tags) then return false end
         vote.tags = vote.tags or prior.tags
     end
     vote.verifiedAt = self:Stamp()
+    vote.receivedAt, vote.via = nil, nil
     item.votes[reviewer] = copyVote(vote)
     return true
+end
+
+-- Relayed copies never inherit the sender's or another peer's verified flag.
+-- Directly verified records are authoritative locally, including deletions.
+function A:SaveRelayedCommunityRating(target, reviewer, vote, relay)
+    if not self:ValidateStoredTarget(target) or reviewer == self:Key(self.myName) then return false end
+    local item=self.db.community[target.guid]
+    if not item then
+        item={guid=target.guid,name=target.name,faction=target.faction,class=target.class,votes={}}
+        self.db.community[target.guid]=item
+    end
+    local prior=item.votes[reviewer]
+    if prior and self:IsCommunityReviewVerified(prior) then return false end
+    if prior and prior.rev>vote.rev then return false end
+    if prior and prior.rev==vote.rev then
+        if prior.score~=vote.score or prior.date~=vote.date then return false end
+        if prior.tags~=nil and vote.tags~=nil and prior.tags~=vote.tags then return false end
+        if prior.tags~=nil or vote.tags==nil then return false end
+    end
+    vote.verifiedAt,vote.freshAt=nil,nil
+    vote.receivedAt,vote.via=self:Stamp(),self:CleanName(relay)
+    item.votes[reviewer]=copyVote(vote)
+    return true
+end
+
+function A:CommunityReviewsForSharing(guid)
+    local result={}
+    local ownKey=self:Key(self.myName)
+    local item=self.db.community[guid]
+    if item and item.faction==self.myFaction then
+        for key,vote in pairs(item.votes) do
+            if key~=ownKey then result[key]=copyVote(vote) end
+        end
+    end
+    local own=self:GetOwnRating(guid)
+    if own and own.faction==self.myFaction then
+        result[ownKey]={sender=self.myName,score=own.removed and 0 or own.score,
+            rev=own.rev,date=own.date,tags=own.tags}
+    end
+    return result
 end
 
 function A:SaveCommunityTags(guid, reviewer, revision, tags)
@@ -88,7 +131,7 @@ function A:GetFreshCommunityScore(guid)
     local cache = self.runtime.cache[guid]
     local total, count = 0, 0
     for _, vote in pairs(cache and cache.votes or {}) do
-        if vote.freshAt and self:Now() - vote.freshAt < self.CACHE_SECONDS then
+        if (self:IsCommunityReviewVerified(vote) or self:Key(vote.sender)==self:Key(self.myName)) and vote.freshAt and self:Now() - vote.freshAt < self.CACHE_SECONDS then
             total, count = total + vote.score, count + 1
         end
     end
@@ -99,12 +142,13 @@ end
 function A:GetSummary(guid)
     local cache = self.runtime.cache[guid]
     if cache then
-        local total, count, withTags, freshCount = 0, 0, 0, 0
+        local total, count, withTags, freshCount, peerCount = 0, 0, 0, 0, 0
         for _, v in pairs(cache.votes) do
             if v.score >= 1 and v.score <= 5 then
                 total, count = total + v.score, count + 1
+                if v.via and not self:IsCommunityReviewVerified(v) then peerCount=peerCount+1 end
                 if v.tags and v.tags ~= "" then withTags = withTags + 1 end
-                if v.freshAt and self:Now() - v.freshAt < self.CACHE_SECONDS then
+                if (self:IsCommunityReviewVerified(v) or self:Key(v.sender)==self:Key(self.myName)) and v.freshAt and self:Now() - v.freshAt < self.CACHE_SECONDS then
                     freshCount = freshCount + 1
                 end
             end
@@ -112,7 +156,7 @@ function A:GetSummary(guid)
         local age = self:Stamp() - (cache.lastComplete or 0)
         return { average = count > 0 and total / count or nil, count = count,
             tagged = withTags, fresh = count > 0 and freshCount == count,
-            freshCount = freshCount, cachedCount = count - freshCount,
+            freshCount = freshCount, cachedCount = count - freshCount, peerCount = peerCount,
             age = math.max(0, age), at = cache.lastComplete or 0 }
     end
     local prior = self.data.recent[guid]

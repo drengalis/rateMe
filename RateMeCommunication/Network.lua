@@ -29,9 +29,9 @@ end
 function A:NetworkStatsText()
     local s = self.netStats or {}
     return string.format("Lookup starts: %d; expansion waves: %d; queries sent/relayed: %d/%d; "
-        .. "rating replies accepted: %d; packet sends/receives: %d/%d; drops (global/peer): %d/%d; queue: %d",
+        .. "rating replies accepted: %d; shared reviews accepted: %d; packet sends/receives: %d/%d; drops (global/peer): %d/%d; queue: %d",
         s.queriesStarted or 0, s.expansions or 0, s.querySeeds or 0, s.queryRelays or 0,
-        s.repliesAccepted or 0, s.sent or 0, s.received or 0,
+        s.repliesAccepted or 0, s.sharedReviewsAccepted or 0, s.sent or 0, s.received or 0,
         s.droppedGlobal or 0, s.droppedPeer or 0, self.outbox and #self.outbox or 0)
 end
 
@@ -103,7 +103,7 @@ function A:UnderInboundLimit(sender, kind, cap, seconds)
     return true
 end
 
-function A:AllowInbound(sender)
+function A:AllowInbound(sender, kind)
     local now = self:Now()
     local global = self.globalInbound
     if not global or now - global.started >= 10 then
@@ -119,7 +119,7 @@ function A:AllowInbound(sender)
         return false
     end
     global.count = global.count + 1
-    if not self:UnderInboundLimit(sender, "all", 18, 20) then
+    if not self:UnderInboundLimit(sender, kind=="shared" and "sharedReplies" or "all", kind=="shared" and 100 or 18, 20) then
         self:BumpNetworkStat("droppedPeer")
         global.reportedPeers = global.reportedPeers or {}
         local senderKey = self:Key(sender)
@@ -208,6 +208,7 @@ function A:SendQueryWave(id, maximum)
             request.seedCount = request.seedCount + 1
             sent = sent + 1
             self:BumpNetworkStat("querySeeds")
+            self:QueueSend(self.payload:SharedLookup(id, request.target, MAX_HOPS), "WHISPER", peer)
         end
     end
     return sent
@@ -292,7 +293,7 @@ function A:FinishQuery(id)
         local prior = cache.votes[key]
         local saved = self.db.community and self.db.community[guid]
         saved = saved and saved.votes[key]
-        if (not saved or revision >= saved.rev) and (not prior or revision >= prior.rev) then
+        if (not saved or revision >= saved.rev) and (not prior or not self:IsCommunityReviewVerified(prior) or revision >= prior.rev) then
             cache.votes[key] = request.votes[key]
         end
     end
@@ -398,7 +399,7 @@ function A:OnMessage(prefix, message, channel, sender, logged)
     if not canonical or self:Key(canonical) == self:Key(self.myName) then return end
     if type(channel) ~= "string" then return end
     if message:sub(1, 2) == "B|" and self.db.settings.receiveRatingBroadcasts == false then return end
-    if not self:AllowInbound(canonical) then return end
+    if not self:AllowInbound(canonical, message:sub(1,2)=="V|" and "shared" or nil) then return end
     local rawMessage = message
     local tag, decoded, args = self:DecodePacket(message, canonical)
     if not tag then
@@ -466,6 +467,10 @@ function A:OnMessage(prefix, message, channel, sender, logged)
                 count = count + 1
             end
         end
+    elseif tag == "S" and channel == "WHISPER" then
+        self:HandleSharedLookup(args, canonical)
+    elseif tag == "V" and channel == "WHISPER" then
+        self:HandleSharedReview(args, canonical)
     elseif tag == "Q" and channel == "WHISPER" then
         -- Queries never use party/raid/guild broadcasts. A received query is
         -- not by itself proof that the sender is a confirmed peer.
@@ -509,7 +514,7 @@ function A:InitializeNetwork()
             if deadline < self:Now() then self.runtime.seen[id] = nil end
         end
     end)
-    C_Timer.NewTicker(15, function() self:PruneInbound(); self:PruneReviewTags(); self:EnsureBroadcastChannel() end)
+    C_Timer.NewTicker(15, function() self:PruneInbound(); self:PruneReviewTags(); self:PruneSharedLookups(); self:EnsureBroadcastChannel() end)
     C_Timer.After(3 + jitter(1.5), function() self:Discovery(); self:OnGroupRosterUpdate() end)
 end
 

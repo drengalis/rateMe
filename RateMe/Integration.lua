@@ -36,6 +36,9 @@ function A:AddTooltip(tooltip)
         local stars = self:StarMarkup(summary.average, 13)
         tooltip:AddDoubleLine("Community", string.format("%s  (%d ratings)", stars, summary.count),
             0.91, 0.91, 0.87, 1, 0.78, 0.30)
+        if summary.peerCount and summary.peerCount>0 then
+            tooltip:AddLine(tostring(summary.peerCount).." review(s) supplied by peers; authors unverified",1,0.75,0.3)
+        end
         if not summary.fresh then tooltip:AddLine("Cached rating — checking online peers", 0.61, 0.65, 0.7) end
     else
         tooltip:AddLine("No community ratings available", 0.63, 0.68, 0.73)

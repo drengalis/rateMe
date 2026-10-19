@@ -39,6 +39,12 @@ assert(GameTooltip.lines[3]=='Last verified: LOCAL 200 PM')
 vote.verifiedAt=nil
 a:DrawReviews()
 assert(row.verificationText.text=='Unverified author')
+vote.via='Relay';vote.receivedAt=300
+a:DrawReviews()
+assert(row.verificationText.text=='Peer supplied' and row.nameText.text=='Alice')
+GameTooltip.lines={}
+row.verification.scripts.OnEnter(row.verification)
+assert(GameTooltip.lines[1]=='Peer supplied' and GameTooltip.lines[2]:find('Relay',1,true))
 a.runtime.cache['Player-target'].votes={me={sender='Me',score=5,date=100}}
 a:DrawReviews()
 assert(row.verificationText.text=='Your review')

@@ -160,6 +160,7 @@ function A:ScoreText(summary)
     local text = self:WindowScoreText(summary.average, 15) .. string.format("  (%d rating%s)",
         summary.count, summary.count == 1 and "" or "s")
     if not summary.fresh then text = text .. "  [cached]" end
+    if summary.peerCount and summary.peerCount>0 then text=text.."  ("..summary.peerCount.." peer supplied)" end
     return text
 end
 
@@ -976,6 +977,10 @@ function A:CreateReviewRow(index)
         elseif row.reviewer == A:Key(A.myName) then
             GameTooltip:AddLine("Your review", 1, 0.82, 0)
             GameTooltip:AddLine("You authored this rating on the current character.", 1, 1, 1, true)
+        elseif row.vote.via then
+            GameTooltip:AddLine("Peer supplied", 1, 0.75, 0.3)
+            GameTooltip:AddLine("Received from "..A:DisplayName(row.vote.via).."; the original author has not been verified directly.",1,1,1,true)
+            GameTooltip:AddLine("Received: "..A:DateText(row.vote.receivedAt),1,1,1,true)
         else
             GameTooltip:AddLine("Unverified author", 1, 0.75, 0.3)
             GameTooltip:AddLine("This copy has not been received directly from its author.", 1, 1, 1, true)
@@ -1034,6 +1039,9 @@ function A:DrawReviews()
         elseif entry.reviewer == self:Key(self.myName) then
             row.verificationText:SetText("Your review")
             row.verificationText:SetTextColor(1, 0.82, 0)
+        elseif vote.via then
+            row.verificationText:SetText("Peer supplied")
+            row.verificationText:SetTextColor(1, 0.75, 0.3)
         else
             row.verificationText:SetText("Unverified author")
             row.verificationText:SetTextColor(1, 0.75, 0.3)

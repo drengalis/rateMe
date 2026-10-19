@@ -91,8 +91,7 @@ function A:HandleRatingBroadcast(args, sender)
     local key = self:Key(sender)
     local saved = self.db.community[target.guid]
     local prior = saved and saved.votes[key]
-    if prior and (prior.rev > vote.rev or
-        (prior.rev == vote.rev and self:IsCommunityReviewVerified(prior))) then return end
+    if prior and self:IsCommunityReviewVerified(prior) and prior.rev >= vote.rev then return end
     -- An unverified copy can become verified on direct receipt of the same revision.
     vote.sender, vote.freshAt = self:CleanName(sender), self:Now()
     if not self:SaveCommunityRating(target, key, vote) then return end

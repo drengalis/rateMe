@@ -14,3 +14,10 @@ In game, test a fresh prerelease DB (no migration/conversion exists). Submit mix
 Use two updated clients: retrieve tags via a lookup and via a broadcast; test out-of-order metadata, edits and deletions. Disable broadcast receipt and verify explicit lookup tags still arrive. Reload and confirm saved tags and Verified author status remain while freshness expires independently. Test with an older v1 client: numeric ratings work; no comments are sent, and extra tag packets are ignored. Test custom-channel, guild/group and known-peer transport separately, including different backend realms. No universal delivery guarantee is made.
 
 Do not include tests/ or TESTING.md in installation ZIPs.
+
+
+## Cached-review aggregation
+
+Run tests/shared_reviews_tests.lua for a requester -> intermediate -> third-peer flow: cached reviews merge into both recipients, original authors/tags remain intact, and source verification is not inherited. Cover duplicate votes, forwarded tombstones, direct-author correction of poisoned revisions, verified-record priority, wrong/unsolicited/expired routes, limits and persistence. review_verification_ui_tests.lua checks the Peer supplied label and supplying-peer tooltip.
+
+In game, place a review only in a third peer's cache, keep the original author offline, and look up the target through an intermediate peer. Confirm the requester receives it as Peer supplied and the intermediate also saves it. Repeat to check deduplication, then test a newer revision/deletion and a direct response from the original author. Compare fresh-only indicators against mixed verified/peer-supplied aggregates. Old clients should continue normal numeric Q/R lookups. Verify timeouts and traffic behavior on the intended realm topology; this feature does not guarantee complete global coverage.

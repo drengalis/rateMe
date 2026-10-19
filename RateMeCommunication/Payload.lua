@@ -157,7 +157,7 @@ function Payload:Decode(message, sender)
             or #decodedLegacy > MAX_PACKET_BYTES then return nil end
         tag, canonical = decodedTag, decodedLegacy
     end
-    local argCount = ({H = 2, A = 2, P = 2, Q = 5, R = 7, B = 11, T = 6})[tag]
+    local argCount = ({H = 2, A = 2, P = 2, Q = 5, R = 7, B = 11, T = 6, S = 8, V = 9})[tag]
     return tag, canonical, argCount and fields(canonical, argCount) or nil
 end
 
@@ -237,4 +237,34 @@ function Payload:ReviewTagFields(args)
     local encoded=self.owner:EncodeReviewTags(tags)
     if not encoded then return end
     return request,guid,rev,encoded
+end
+
+
+-- Additive cached-review lookup. Each relay uses a new child request ID;
+-- responses return along explicit parent/child routes, never a claimed origin.
+function Payload:SharedLookup(id, target, hops)
+    return self:Legacy("S", {"1",id,target.guid,target.name,target.faction,target.class or "",hops})
+end
+function Payload:SharedLookupFields(args)
+    if not args or #args~=8 or args[2]~="1" then return end
+    local id,guid,name,faction,class,hops=args[3],args[4],self.owner:CleanName(args[5]),args[6],args[7],tonumber(args[8])
+    if not self:ValidId(id) or not self:ValidGuid(guid) or not name
+        or (faction~="Alliance" and faction~="Horde") or #class>24 or class:find("[^A-Z_]")
+        or not hops or hops~=math.floor(hops) or hops<0 or hops>2 then return end
+    return id,{guid=guid,name=name,faction=faction,class=class},hops
+end
+function Payload:SharedReview(id, guid, vote)
+    return self:Legacy("V", {"1",id,guid,vote.sender,vote.score,vote.rev,vote.date,
+        vote.tags==nil and "?" or vote.tags})
+end
+function Payload:SharedReviewFields(args)
+    if not args or #args~=9 or args[2]~="1" then return end
+    local id,guid,author=args[3],args[4],self.owner:CleanName(args[5])
+    if not self:ValidId(id) or not self:ValidGuid(guid) or not author then return end
+    local _,_,score,rev,stamp=self:RatingFields({"R",id,guid,args[6],args[7],args[8],"0"})
+    if not score then return end
+    local tags
+    if args[9]~="?" then tags=self.owner:EncodeReviewTags(args[9]);if not tags then return end end
+    if score==0 then tags="" end
+    return id,guid,{sender=author,score=score,rev=rev,date=stamp,tags=tags}
 end
