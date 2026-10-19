@@ -281,3 +281,15 @@ All rendering, WoW UI template metrics, game timestamps and nameplate positionin
 - Only `RateMeData` declares `## SavedVariables: RateMeDB`, producing `SavedVariables/RateMeData.lua`.
 - Personal ratings, settings, reviewer blocks, recent community summaries and peer records live in that single table. The main addon's storage is a binding layer only.
 - Run `tests/data_subaddon_tests.lua` and `tests/debug_activity_tests.lua` along with existing network, UI and payload tests. There is no legacy import or schema migration in this unreleased layout.
+
+
+
+## Persistent reviews and communication companion
+
+Run these additional suites from the repository root with Lua 5.3+ (or texlua):
+
+- tests/persistent_lookup_tests.lua: durable reviews/comments, reload serialization, revision merge, retained offline reviews, tombstones, stale replay rejection and per-record freshness.
+- tests/review_verification_ui_tests.lua: verified/unverified/own-review labels and verification timestamp tooltip.
+- tests/communication_subaddon_tests.lua: all TOCs, dormant standalone companion, bindings, v1 payloads and main-addon event routing.
+
+In game, install all three companion folders, retrieve a rating and comment, reload, and verify cached records remain visible with Verified author status and local verification time. Verify a newer revision replaces the record and a removal persists. Only recently received direct ratings may drive fresh community indicators. No tests are included in installation ZIPs.

@@ -10,27 +10,12 @@ Everything runs inside WoW. You do **not** need an account, website, or external
 ## Installation
 
 1. Download this repository using **Code → Download ZIP**, then extract it.
-2. Copy both the **\`RateMe\` and **\`RateMeData\` folders inside the download** to your WoW Forever \`Interface/AddOns\` directory. Keep the `RateMe/Media` subfolder.
-3. Confirm your folder structure looks like this (the game installation directory may vary):
-
-   \`\`\`text
-   World of Warcraft/
-   └── _classic_beta_/
-       └── Interface/
-           └── AddOns/
-               ├── RateMe/
-               │   ├── RateMe.toc
-               │   ├── Core.lua
-               │   └── Media/
-               └── RateMeData/
-                   ├── RateMeData.toc
-                   └── Store.lua
-   \`\`\`
-
-4. Enable **Rate Me!** and its required **Rate Me! Data** companion in the character-selection AddOns menu, then enter the game.
+2. Copy **RateMe**, **RateMeData**, and **RateMeCommunication** into your WoW Forever `Interface/AddOns` directory. Keep `RateMe/Media` intact.
+3. Each folder must contain its matching `.toc` file directly, for example `Interface/AddOns/RateMeCommunication/RateMeCommunication.toc`.
+4. Enable **Rate Me!**, **Rate Me! Data**, and **Rate Me! Communication** in the character-selection AddOns menu, then enter the game.
 5. Click the gold star on your minimap, or type **\`/rateme\`**.
 
-When updating, replace both installed \`RateMe\` and \`RateMeData\` addon folders. The companion addon owns all persistent records in the `RateMeDB` SavedVariables table, saved by WoW in `SavedVariables/RateMeData.lua`. This unreleased storage layout starts with a fresh database and has no import or migration from earlier previews. Reload the game UI **once after replacing addon files**; you do **not** need to reload after rating someone or changing settings.
+When updating, replace all three installed addon folders. The companion addon owns all persistent records in the `RateMeDB` SavedVariables table, saved by WoW in `SavedVariables/RateMeData.lua`. This unreleased storage layout starts with a fresh database and has no import or migration from earlier previews. Reload the game UI **once after replacing addon files**; you do **not** need to reload after rating someone or changing settings.
 
 ## Get started
 
@@ -143,9 +128,9 @@ Rate Me! is intended to be a helpful personal/community reference, not a definit
 
 ## Troubleshooting
 
-**I don't see Rate Me! in the AddOns list.** Make sure both \`Interface/AddOns/RateMe/RateMe.toc\` and \`Interface/AddOns/RateMeData/RateMeData.toc\` exist, rather than an extra nested \`rateMe-main/RateMe\` folder. Keep the \`Media\` files with the addon.
+**I don't see Rate Me! in the AddOns list.** Make sure `RateMe/RateMe.toc`, `RateMeData/RateMeData.toc`, and `RateMeCommunication/RateMeCommunication.toc` exist directly under `Interface/AddOns`, rather than an extra nested \`rateMe-main/RateMe\` folder. Keep the \`Media\` files with the addon.
 
-**The stars show empty squares or missing artwork.** Reinstall both addon folders, including the whole \`RateMe\` folder, including \`Media\`. Rate Me! uses bundled star textures rather than Unicode star characters.
+**The stars show empty squares or missing artwork.** Reinstall all three addon folders, including the whole \`RateMe\` folder, including \`Media\`. Rate Me! uses bundled star textures rather than Unicode star characters.
 
 **A player has no community rating.** This can simply mean no reachable online reviewers have replied. Your personal ratings still work.
 
@@ -161,4 +146,12 @@ Rate Me! is intended to be a helpful personal/community reference, not a definit
 
 ## Data companion
 
-`RateMeData` is a required companion addon. It owns the single account-wide `RateMeDB` SavedVariables table, personal ratings, preferences, community history, peers, reviewer blocks, and data classes. `RateMe` declares `## Dependencies: RateMeData` and does not declare a separate SavedVariables table. Both addon folders must be installed side by side. The storage design is unreleased and intentionally has no legacy import or migration code.
+`RateMeData` is a required companion addon. It owns the single account-wide `RateMeDB` SavedVariables table, personal ratings, preferences, community history, peers, reviewer blocks, and data classes. `RateMe` declares `## Dependencies: RateMeData, RateMeCommunication` and does not declare a separate SavedVariables table. All three addon folders must be installed side by side. The storage design is unreleased and intentionally has no legacy import or migration code.
+
+
+
+## Current addon layout
+
+Install all three folders together: **RateMe**, **RateMeData**, and **RateMeCommunication**. RateMeData owns RateMeDB; received reviews and fetched comments now persist across sessions and merge by reviewer/revision. Confirmed deletions are retained. A green Verified author label identifies reviews received directly from their author; source verification persists independently of freshness. Cached records do not automatically count as fresh for alerts. RateMeCommunication owns payloads, transport, discovery, throttling, lookup routing and communication diagnostics. Version 1, protocol 1 and prefix RATEME are unchanged. This unreleased storage format includes no legacy migration.
+
+Run the Lua suites in tests/ from the repository root. See RateMe/TESTING.md for validation guidance. Install ZIPs exclude tests and TESTING.md.

@@ -4,3 +4,4 @@ for _, path in ipairs({'Store','Settings','Ratings','Community','Peers','Reviewe
     assert(loadfile('RateMeData/'..path..'.lua'))('RateMeData', S)
 end
 return S
+

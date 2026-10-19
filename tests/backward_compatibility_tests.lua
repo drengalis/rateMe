@@ -16,8 +16,8 @@ function A:AllowInbound() return true end
 local sends = {}
 local S = dofile('tests/load_data_addon.lua')
 S:Bind(A)
-assert(loadfile("RateMe/Payload.lua"))("RateMe", A)
-assert(loadfile("RateMe/Network.lua"))("RateMe", A)
+dofile("tests/load_communication_addon.lua")(A)
+
 function A:QueueSend(packet, channel, to, logged)
     sends[#sends + 1] = { packet = packet, channel = channel, to = to, logged = logged }
     return true
@@ -74,3 +74,4 @@ assert(observed.response and observed.response.parts[4] == "4")
 assert(A.SETTINGS_SCHEMA_VERSION == 1)
 assert(A.RegisterSettingsMigration == nil and A.MigrateSettings == nil)
 print("Backward-compatibility tests passed")
+

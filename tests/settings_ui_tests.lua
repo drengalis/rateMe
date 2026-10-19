@@ -144,3 +144,4 @@ for _,unwanted in ipairs({'Warn when someone joining your group has a low rating
 end
 print('PASS: six full-width responsive opaque panels, no stray header accents, help icons or subtitles')
 print('PASS: controls and defaults; dependent dimming; callbacks; threshold rounding; unchanged callbacks')
+

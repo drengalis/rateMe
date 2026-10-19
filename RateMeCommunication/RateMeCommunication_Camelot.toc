@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: Rate Me! Communication
+## Notes: Peer transport, discovery, payload processing and lookup routing for Rate Me!.
+## Author: Rate Me! Community
+## Version: 1
+## Dependencies: RateMeData
+
+Store.lua
+Payload.lua
+Diagnostics.lua
+Network.lua

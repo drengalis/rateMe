@@ -2,7 +2,8 @@
 -- routing, rate limits, and application state; this class owns wire formats.
 -- v1 messages are immutable. An X|version|body packet is allowed only after a
 -- confirmed peer advertises that version with K|1|comma-separated-versions.
-local _, A = ...
+local _, Communication = ...
+local A = Communication.API
 
 local Payload = {}
 Payload.__index = Payload
@@ -202,7 +203,6 @@ function Payload:CommentFields(args, maxBytes)
 end
 
 A.Payload = Payload
-A.payload = Payload.new(A)
 -- Facade preserved for existing addon callers and tests; implementations live
 -- in Payload, not Network. New wire formats register exclusively here.
 function A:RegisterWireCodec(version, encode, decode) return self.payload:RegisterCodec(version, encode, decode) end

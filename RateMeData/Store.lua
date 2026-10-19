@@ -33,8 +33,8 @@ function Store:Bind(addon)
     addon.CACHE_SECONDS = addon.CACHE_SECONDS or 900
     addon.MAX_RECENT = addon.MAX_RECENT or 150
     addon.MAX_COMMENT = addon.MAX_COMMENT or 160
-    -- Session-only community votes and request state also live in this module;
-    -- they are deliberately not part of the on-disk SavedVariables table.
+    -- Runtime views and request state also live here. Durable reviews are in
+    -- db.community; monotonic timers and transport evidence stay session-only.
     self.session = self.session or addon.runtime or {cache={}, requests={}, seen={}, comments={}}
     addon.runtime = self.session
     return addon
@@ -52,7 +52,7 @@ function Store:Open(protocol, now, recentLimit)
         error("RateMeData: unsupported settings schema; refusing to modify RateMeDB")
     end
     db.schema, db.settingsSchema = self.SCHEMA_VERSION, 1
-    for _, key in ipairs({"authored", "settings", "ignored", "recent", "peers"}) do
+    for _, key in ipairs({"authored", "settings", "ignored", "recent", "peers", "community"}) do
         if type(db[key]) ~= "table" then db[key] = {} end
     end
     if db.peerProtocol ~= protocol then

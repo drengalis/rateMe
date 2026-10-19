@@ -58,3 +58,4 @@ A.db.authored['owner-realm']['Player-2']={score=5}
 assert(A:GetOwnRating('Player-2').score==5)
 assert(RateMeDB.settingsSchema==1)
 print('PASS: companion owns the sole SavedVariables table, all data categories, no migration')
+

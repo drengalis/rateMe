@@ -74,3 +74,4 @@ for _,pair in ipairs({{f.tabRecent,'recent'},{f.tabSettings,'settings'},{f.tabMi
         'Settings must not display a list-only column rule or footer panel')
 end
 print('PASS: title-bar layout, section/column dividers, footer background, tab visibility and close clearance')
+

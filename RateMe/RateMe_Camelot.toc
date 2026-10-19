@@ -3,13 +3,12 @@
 ## Notes: Friendly player ratings, reviews, and decentralized on-demand reputation lookups for WoW Forever.
 ## Author: Rate Me! Community
 ## Version: 1
-## Dependencies: RateMeData
+## Dependencies: RateMeData, RateMeCommunication
 
 Core.lua
 Storage.lua
 CommentSafety.lua
-Payload.lua
-Network.lua
+Communication.lua
 Alerts.lua
 Highlights.lua
 UI.lua

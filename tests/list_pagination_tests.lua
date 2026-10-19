@@ -125,3 +125,4 @@ click(f.tabSettings)
 assert(not f.search.shown and not f.pageIndicator.shown and not f.previousPage.shown and not f.nextPage.shown)
 assert(not f.allCharacters and not f.refresh and not f.clearSearch.shown)
 print('PASS: search-only footer and clear button; Settings-only All Characters;  20-item pagination; globally filtered/sorted lists; tab/empty boundaries; scroll and settings')
+

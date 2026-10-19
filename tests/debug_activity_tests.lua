@@ -6,8 +6,8 @@ local A = {db = {settings = {debug = false}, peers = {}, ignored = {}}, myName =
 assert(loadfile('RateMe/Core.lua'))('RateMe', A)
 local S = dofile('tests/load_data_addon.lua')
 assert(loadfile('RateMe/Storage.lua'))('RateMe', A)
-assert(loadfile('RateMe/Payload.lua'))('RateMe', A)
-assert(loadfile('RateMe/Network.lua'))('RateMe', A)
+dofile('tests/load_communication_addon.lua')(A)
+
 local function joined() return table.concat(messages, '\n') end
 local function contains(s) assert(joined():find(s,1,true), 'Expected activity text: ' .. s .. '\n' .. joined()) end
 A:DebugPacket('RX','C|id|guid|1|private review text','WHISPER','Peer-Realm')
@@ -57,3 +57,4 @@ local integration=assert(io.open('RateMe/Integration.lua','r')):read('*a')
 assert(integration:find('A:DrawSettings() -- Keep the Settings checkbox synchronized',1,true))
 assert(A.SETTINGS_SCHEMA_VERSION==1 and A.protocol=='1' and A.prefix=='RATEME')
 print('PASS: readable activity messages, redaction, transports and settings')
+

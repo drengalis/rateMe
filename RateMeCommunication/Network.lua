@@ -1,4 +1,5 @@
-local _, A = ...
+local _, Communication = ...
+local A = Communication.API
 
 local PREFIX = "RATEME"
 local MAX_QUEUE = 180
@@ -234,7 +235,7 @@ function A:Query(target, force)
         pending.votes[self:Key(self.myName)] = {
             sender = self.myName, score = own.score, date = own.date,
             rev = own.rev, hasComment = own.comment and own.comment ~= "",
-            comment = own.comment or "",
+            comment = own.comment or "", freshAt = t,
         }
     end
     self.runtime.requests[id] = pending
@@ -291,7 +292,13 @@ function A:FinishQuery(id)
     end
     local target, guid = request.target, request.guid
     local cache = self.runtime.cache[guid] or {}
-    cache.votes = request.votes
+    cache.votes = cache.votes or {}
+    for key, revision in pairs(request.revisions) do
+        local prior = cache.votes[key]
+        if not prior or revision >= prior.rev then cache.votes[key] = request.votes[key] end
+    end
+    local ownKey = self:Key(self.myName)
+    cache.votes[ownKey] = request.votes[ownKey]
     cache.fetchedAt = self:Now()
     cache.queryUntil = nil
     cache.lastComplete = self:Stamp()
@@ -386,12 +393,14 @@ function A:HandleRating(args, sender)
         request.responseCount = request.responseCount + 1
     end
     -- Track tombstone revisions too; an old positive vote cannot revive a removal.
+    local vote = {score = score, rev = revision, date = date, hasComment = hasComment == 1,
+        sender = self:CleanName(sender), freshAt = self:Now()}
+    if not self:SaveCommunityRating(request.target, key, vote) then return end
     request.revisions[key] = revision
     if score == 0 then
         request.votes[key] = nil
     else
-        request.votes[key] = {score = score, rev = revision, date = date, hasComment = hasComment == 1,
-            sender = self:CleanName(sender)}
+        request.votes[key] = vote
     end
     -- Only a validated direct reviewer response establishes peer reachability;
     -- arbitrary unsolicited R packets must not populate the peer directory.
@@ -441,6 +450,7 @@ function A:HandleComment(args, sender, logged, rawMessage, canonicalMessage)
     if safeComment == "" then return end
     self.runtime.comments[id] = nil
     vote.comment = safeComment
+    self:SaveCommunityComment(guid, self:Key(sender), vote)
     -- Store evidence from CHAT_MSG_ADDON_LOGGED rather than an editable rater
     -- field in the packet. Only this captured sender can be reported.
     if self.db and self.db.settings and self.db.settings.debug then
@@ -563,10 +573,10 @@ function A:InitializeNetwork()
     self.netFrame:RegisterEvent("PLAYER_GUILD_UPDATE")
     self.netFrame:SetScript("OnEvent", function(_, event, ...)
         if event == "CHAT_MSG_ADDON" or event == "CHAT_MSG_ADDON_LOGGED" then
-            A:OnMessage(select(1, ...), select(2, ...), select(3, ...), select(4, ...), event == "CHAT_MSG_ADDON_LOGGED")
+            self:OnMessage(select(1, ...), select(2, ...), select(3, ...), select(4, ...), event == "CHAT_MSG_ADDON_LOGGED")
         elseif event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_GUILD_UPDATE" then
-            A:Discovery()
-            if event == "GROUP_ROSTER_UPDATE" then A:OnGroupRosterUpdate() end
+            self:Discovery()
+            if event == "GROUP_ROSTER_UPDATE" then self:OnGroupRosterUpdate() end
         end
     end)
     C_Timer.NewTicker(CHUNK_DELAY, function()

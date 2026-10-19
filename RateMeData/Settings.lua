@@ -55,6 +55,7 @@ function A:InitializeStorage()
     if type(db.authored[self:Key(self.myName)]) ~= "table" then
         db.authored[self:Key(self.myName)] = {}
     end
+    self:RestoreCommunityLookups()
 end
 
 

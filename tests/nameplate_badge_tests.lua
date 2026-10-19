@@ -88,3 +88,4 @@ combat=true;A:OnNameplateAdded('nameplate1');assert(entry.badge==badge,'reuse wi
 print('PASS: independent nameplate badge, star texture and one-decimal text')
 print('PASS: community preference, personal fallback, gold/red/neutral thresholds')
 print('PASS: toggle, PvE restriction, nameplate removal and combat-safe reuse')
+

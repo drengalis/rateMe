@@ -93,3 +93,4 @@ local S = dofile('tests/load_data_addon.lua')
 local storage=assert(loadfile('RateMe/Storage.lua'));storage('RateMe', A)
 assert(A:SanitizeComment('First\r\nSecond|T\9ok')=='First\nSecondT ok')
 print('PASS: newline-preserving comment sanitization and WoW formatting protection')
+

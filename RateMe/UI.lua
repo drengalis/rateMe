@@ -918,6 +918,30 @@ function A:CreateReviewRow(index)
     row.nameText = label(row, "GameFontHighlight", "", 8, -8, 310)
     row.scoreText = label(row, "GameFontNormal", "", 362, -8, 180, "RIGHT")
     row.dateText = label(row, "GameFontDisableSmall", "", 8, -30, 300)
+    row.verification = CreateFrame("Button", nil, row)
+    row.verification:SetSize(220, 18)
+    row.verification:SetPoint("TOPRIGHT", row, "TOPRIGHT", -12, -27)
+    row.verificationText = row.verification:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.verificationText:SetAllPoints()
+    row.verificationText:SetJustifyH("RIGHT")
+    row.verification:SetScript("OnEnter", function(self)
+        if not row.vote then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if A:IsCommunityReviewVerified(row.vote) then
+            GameTooltip:AddLine("Verified author", 0.35, 1, 0.45)
+            GameTooltip:AddLine("This rating was received directly from its author.", 1, 1, 1, true)
+            GameTooltip:AddLine("Last verified: " .. A:DateText(row.vote.verifiedAt), 1, 1, 1, true)
+            GameTooltip:AddLine("Verified identifies the source; it does not mean the review is accurate or up to date.", 0.8, 0.8, 0.8, true)
+        elseif row.reviewer == A:Key(A.myName) then
+            GameTooltip:AddLine("Your review", 1, 0.82, 0)
+            GameTooltip:AddLine("You authored this rating on the current character.", 1, 1, 1, true)
+        else
+            GameTooltip:AddLine("Unverified author", 1, 0.75, 0.3)
+            GameTooltip:AddLine("This copy has not been received directly from its author.", 1, 1, 1, true)
+        end
+        GameTooltip:Show()
+    end)
+    row.verification:SetScript("OnLeave", function() GameTooltip:Hide() end)
     row.commentText = label(row, "GameFontHighlightSmall", "", 8, -49, 530)
     row.commentText:SetJustifyV("TOP")
     row.commentText:SetHeight(31)
@@ -946,8 +970,12 @@ function A:DrawReviews()
     local summary = self:GetSummary(guid)
     f.targetText:SetText(self:DisplayName(f.target.name))
     f.ratingText:SetText(self:ScoreText(summary))
-    f.status:SetText(summary and summary.fresh and "Directly verified responses from the latest query"
-        or "Cached result; refresh to reach online reviewers")
+    if summary and summary.count > 0 then
+        f.status:SetText(string.format("%d recently verified / %d cached; refresh to check for updates",
+            summary.freshCount or 0, summary.cachedCount or summary.count))
+    else
+        f.status:SetText("No saved reviews; refresh to reach online reviewers")
+    end
     local cache = self.runtime.cache[guid]
     local list = {}
     if cache and cache.votes then
@@ -968,6 +996,17 @@ function A:DrawReviews()
         row.block:SetText(ignored and "Unblock" or "Block")
         row.scoreText:SetText(self:WindowScoreText(vote.score, 15))
         row.dateText:SetText("Rated " .. self:DateText(vote.date))
+        if self:IsCommunityReviewVerified(vote) then
+            row.verificationText:SetText("Verified author")
+            row.verificationText:SetTextColor(0.35, 1, 0.45)
+        elseif entry.reviewer == self:Key(self.myName) then
+            row.verificationText:SetText("Your review")
+            row.verificationText:SetTextColor(1, 0.82, 0)
+        else
+            row.verificationText:SetText("Unverified author")
+            row.verificationText:SetTextColor(1, 0.75, 0.3)
+        end
+
         local commentText, action = self:ReviewCommentText(guid, entry.reviewer, vote)
         row.commentText:SetText(commentText)
         row.visibility:SetText(action or "Show")

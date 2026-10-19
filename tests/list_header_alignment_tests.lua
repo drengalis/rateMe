@@ -74,3 +74,4 @@ for _,c in ipairs(columns) do
     assert(c.header.point[4]==c.field.point[4]+x and c.header.width==c.field.width)
 end
 print('PASS: both player lists have right-aligned headings matching name, score and date cells')
+

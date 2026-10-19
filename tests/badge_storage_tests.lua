@@ -14,3 +14,4 @@ A.db.settings.ratingHighlightsBadge=true; A.db.settings.ratingHighlightsGlow=fal
 A:InitializeStorage()
 assert(A.db.settings.ratingHighlightsBadge and not A.db.settings.ratingHighlightsGlow, 'new values must persist')
 print('PASS: badge defaults off, default glow preserved, all ratings and settings retained')
+
