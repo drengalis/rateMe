@@ -4,9 +4,11 @@ _G = _G or {}
 local A = {db={settings={lowRatingAlerts=false,lowRatingPersonal=false,lowRatingCommunity=true,
  lowRatingPersonalThreshold=3,lowRatingThreshold=3,ratingHighlights=false,ratingHighlightsGlow=true,ratingHighlightsBadge=false,
  ratingHighlightsPersonal=false,ratingHighlightsCommunity=true,partyReviewPrompt=true,
- hideCommentsByDefault=false,minimapVisible=true,allCharacters=false}}}
+ hideCommentsByDefault=false,minimapVisible=true,allCharacters=false,
+ receiveRatingBroadcasts=true,sendRatingBroadcasts=true,lookupPeerCount=7}}}
 local counters={alert=0,highlights=0,minimap=0}
 function A:SetSetting(key,value) self.db.settings[key]=value;return true end
+function A:OnCommunicationSettingsChanged()counters.communication=(counters.communication or 0)+1 end
 function A:OnAlertSettingsChanged() counters.alert=counters.alert+1 end
 function A:OnHighlightSettingsChanged() counters.highlights=counters.highlights+1 end
 function A:SetMinimapVisible(v) counters.minimap=counters.minimap+1;self.db.settings.minimapVisible=v end
@@ -59,7 +61,7 @@ local chunk=assert(loadfile('RateMe/UI.lua'))
 chunk('RateMe', A)
 A:CreateSettingsPanel()
 local p=A.main.settingsPanel.content
-assert(p.height==1285 and p.width==699)
+assert(p.height==1525 and p.width==699)
 assert(A.main.settingsPanel.scrollChild==p)
 assert(p.enabled and p.alertPersonal and p.alertCommunity and p.threshold and p.personalThreshold)
 assert(p.highlights and p.highlightGlow and p.highlightBadge and p.highlightPersonal and p.highlightCommunity and p.minimapVisible and p.partyReviewPrompt and p.hideCommentsByDefault and p.allCharacters and p.debug)
@@ -67,7 +69,7 @@ local cards={}
 for _,o in ipairs(objects) do
  if o.parent==p and o.bgColor then cards[#cards+1]=o end
 end
-assert(#cards==7,'Expected seven distinct sections, got '..#cards)
+assert(#cards==8,'Expected eight distinct sections, got '..#cards)
 local previousBottom=0
 for _,card in ipairs(cards) do
  assert(card.bgColor[4]==1,'Panels must be opaque')
@@ -142,6 +144,17 @@ for _,unwanted in ipairs({'Warn when someone joining your group has a low rating
  'Open Rate Me! quickly using the draggable minimap star.'}) do
  for _,o in ipairs(objects) do assert(o.text~=unwanted, 'Unexpected section subtitle: '..unwanted) end
 end
-print('PASS: six full-width responsive opaque panels, no stray header accents, help icons or subtitles')
+print('PASS: eight full-width responsive opaque panels, no stray header accents, help icons or subtitles')
 print('PASS: controls and defaults; dependent dimming; callbacks; threshold rounding; unchanged callbacks')
 
+
+assert(p.receiveRatingBroadcasts.checked and p.sendRatingBroadcasts.checked)
+p.receiveRatingBroadcasts:SetChecked(false);p.receiveRatingBroadcasts.scripts.OnClick(p.receiveRatingBroadcasts)
+p.sendRatingBroadcasts:SetChecked(false);p.sendRatingBroadcasts.scripts.OnClick(p.sendRatingBroadcasts)
+assert(not A.db.settings.receiveRatingBroadcasts and not A.db.settings.sendRatingBroadcasts)
+assert(counters.communication==2)
+p.lookupPeerCount:SetValue(12.4)
+assert(A.db.settings.lookupPeerCount==12 and p.lookupPeerCount.value==12 and p.lookupPeerValue.text=='12')
+p.lookupPeerCount:SetValue(100)
+assert(A.db.settings.lookupPeerCount==20 and p.lookupPeerCount.value==20)
+print('PASS: communication checkboxes and normalized peer-count slider')

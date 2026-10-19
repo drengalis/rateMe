@@ -112,7 +112,7 @@ If you hide the minimap button, **\`/rateme\` always remains available**.
 
 ## How community ratings work
 
-Rate Me! uses an **on-demand peer-to-peer network** through WoW's built-in addon messaging. There is **no central ratings database, custom chat channel, or outside server**.
+Rate Me! uses an **on-demand peer-to-peer network** through WoW's built-in addon messaging. There is **no central ratings database or outside server**. Optional rating announcements use the RateMeNet custom addon channel alongside guild/group and confirmed-peer routes.
 
 When you look up a player, your client asks reachable addon users for ratings. A review only counts in a fresh community sample if it is received **directly from its original reviewer**; another player's copied local ratings are not accepted as authoritative. Identical reviewer responses are counted once.
 
@@ -155,3 +155,8 @@ Rate Me! is intended to be a helpful personal/community reference, not a definit
 Install all three folders together: **RateMe**, **RateMeData**, and **RateMeCommunication**. RateMeData owns RateMeDB; received reviews and fetched comments now persist across sessions and merge by reviewer/revision. Confirmed deletions are retained. A green Verified author label identifies reviews received directly from their author; source verification persists independently of freshness. Cached records do not automatically count as fresh for alerts. RateMeCommunication owns payloads, transport, discovery, throttling, lookup routing and communication diagnostics. Version 1, protocol 1 and prefix RATEME are unchanged. This unreleased storage format includes no legacy migration.
 
 Run the Lua suites in tests/ from the repository root. See RateMe/TESTING.md for validation guidance. Install ZIPs exclude tests and TESTING.md.
+
+
+## Communication preferences
+
+Settings > Communication controls the maximum direct peers per lookup (1-20, default 7), sending rating announcements, and receiving/saving announcements. Both broadcast toggles default ON. Only announcements whose authenticated sender matches their claimed reviewer are marked verified. Numeric metadata is broadcast; comments remain on-demand. Delivery uses available custom-channel, guild/group and known-peer routes and cannot guarantee reaching every Forever addon user. See RateMe/README.md for scope and limits.

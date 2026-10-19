@@ -157,7 +157,7 @@ function Payload:Decode(message, sender)
             or #decodedLegacy > MAX_PACKET_BYTES then return nil end
         tag, canonical = decodedTag, decodedLegacy
     end
-    local argCount = ({H = 2, A = 2, P = 2, Q = 5, R = 7, ["C?"] = 3, C = 5})[tag]
+    local argCount = ({H = 2, A = 2, P = 2, Q = 5, R = 7, ["C?"] = 3, C = 5, B = 11})[tag]
     return tag, canonical, argCount and fields(canonical, argCount) or nil
 end
 
@@ -212,3 +212,26 @@ function A:HandleCapabilities(message, sender) return self.payload:HandleCapabil
 function A:WireVersionForPeer(peer) return self.payload:VersionForPeer(peer) end
 function A:EncodePacket(tag, values, peer) return self.payload:Encode(tag, values, peer) end
 function A:DecodePacket(message, sender) return self.payload:Decode(message, sender) end
+
+
+-- B|1|reviewer|targetGUID|targetName|faction|class|score|revision|UTC|hasComment
+-- No written review text travels in broadcast traffic.
+function Payload:RatingBroadcast(target, record)
+    return self:Legacy("B", {"1", self.owner.myName, target.guid, target.name,
+        target.faction, target.class or "", record.removed and 0 or record.score,
+        record.rev, record.date, record.comment and record.comment ~= "" and 1 or 0})
+end
+
+function Payload:BroadcastFields(args)
+    if not args or #args ~= 11 or args[2] ~= "1" then return end
+    local reviewer, name = self.owner:CleanName(args[3]), self.owner:CleanName(args[5])
+    local guid, faction, class = args[4], args[6], args[7]
+    if not reviewer or not name or not self:ValidGuid(guid)
+        or (faction ~= "Alliance" and faction ~= "Horde")
+        or #class > 24 or class:find("[^A-Z_]") then return end
+    local _, _, score, rev, stamp, hasComment = self:RatingFields(
+        {"R", "broadcast", guid, args[8], args[9], args[10], args[11]})
+    if not score then return end
+    return {guid=guid, name=name, faction=faction, class=class}, reviewer,
+        {score=score, rev=rev, date=stamp, hasComment=hasComment == 1}
+end

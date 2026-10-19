@@ -4,7 +4,7 @@ local A = Communication.API
 -- Translate packet metadata into readable local activity messages. Do not
 -- display raw packet data: even malformed packets may contain private reviews.
 local PACKET_NAMES = {
-    H = "peer discovery greeting", A = "peer discovery reply",
+    B = "rating announcement", H = "peer discovery greeting", A = "peer discovery reply",
     P = "peer introduction", K = "supported message format announcement",
     Q = "rating lookup request", R = "rating reply",
     ["C?"] = "written review request", C = "written review",

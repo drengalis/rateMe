@@ -102,3 +102,11 @@ local evidence=A:GetCommentReportEvidence(target.guid,A:Key(reviewer),vote)
 assert(evidence and evidence.author==reviewer and evidence.comment==vote.comment)
 print('PASS: newline-preserving logged comments retain authenticated report author')
 
+
+-- The configured limit bounds the total root peers across all waves.
+for _,budget in ipairs({1,20}) do
+ reset();A.db.settings.lookupPeerCount=budget
+ assert(A:Query(target));advance(16)
+ assert(A.netStats.querySeeds==budget, 'configured root budget '..budget)
+end
+print('PASS: configurable 1 and 20 root-peer budgets across lookup waves')

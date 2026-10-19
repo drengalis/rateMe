@@ -293,3 +293,10 @@ Run these additional suites from the repository root with Lua 5.3+ (or texlua):
 - tests/communication_subaddon_tests.lua: all TOCs, dormant standalone companion, bindings, v1 payloads and main-addon event routing.
 
 In game, install all three companion folders, retrieve a rating and comment, reload, and verify cached records remain visible with Verified author status and local verification time. Verify a newer revision replaces the record and a removal persists. Only recently received direct ratings may drive fresh community indicators. No tests are included in installation ZIPs.
+
+
+## Communication broadcasts
+
+Run tests/broadcast_tests.lua for authenticated-sender matching, spoof/relay rejection, duplicate delivery, revision and removal handling, receive/send toggles, edit coalescing, queue cancellation and unavailable-channel behavior. tests/network_tests.lua covers configured 1/20 peer limits; settings_ui_tests.lua covers the additional Communication card.
+
+In-game: use two current clients on the same backend realm and different backend realms. Enable diagnostics, submit/edit/delete a rating, and verify receipt and the Verified author badge. Disable receiving and confirm announcements no longer change storage while explicit lookups work. Disable sending and confirm queued announcements are discarded. Test custom CHANNEL, guild/group and known-peer whispers separately: queued/success status is not proof of delivery. No ordinary-chat fallback is implemented. Global reach must not be claimed without observed delivery across the intended populations.

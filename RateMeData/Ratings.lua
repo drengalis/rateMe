@@ -65,6 +65,7 @@ function A:SaveOwnRating(target, score, comment)
         self:Debug(string.format("Saved your rating for %s: %d out of 5 stars (update %d).",
             self:DisplayName(target.name), score, records[target.guid].rev))
     end
+    if self.ScheduleRatingBroadcast then self:ScheduleRatingBroadcast(target) end
     if self.OnPersonalRatingChanged then self:OnPersonalRatingChanged(target.guid) end
     return true
 end
@@ -86,6 +87,7 @@ function A:DeleteOwnRating(target)
         self:Debug(string.format("Removed your rating for %s (update %d).",
             self:DisplayName(target.name), records[target.guid].rev))
     end
+    if self.ScheduleRatingBroadcast then self:ScheduleRatingBroadcast(target) end
     if self.OnPersonalRatingChanged then self:OnPersonalRatingChanged(target.guid) end
     return true
 end

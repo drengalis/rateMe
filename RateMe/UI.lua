@@ -332,7 +332,7 @@ function A:CreateSettingsPanel()
     -- hard-coded 665/640 widths that left a large unused strip on the right.
     -- Match future size changes (including UI-scale changes) automatically.
     local p = CreateFrame("Frame", nil, scroll)
-    p:SetSize(699, 1285) -- seven responsive sections, including optional debug output
+    p:SetSize(699, 1525) -- eight responsive sections, including communication controls
     scroll:SetScrollChild(p)
     scroll.content = p
     scroll:SetScript("OnSizeChanged", function(_, width)
@@ -503,7 +503,37 @@ function A:CreateSettingsPanel()
         "Left-click: open     Left-drag: move     /rateme: always available", 55, -84, 545)
     miniHint:SetTextColor(unpack(MUTED))
 
-    local diagnostics = section(1176, 90, "Diagnostics")
+    local communication = section(1176, 220, "Communication")
+    p.sendRatingBroadcasts = checkbox(communication, "sendRatingBroadcasts",
+        "Announce my new, edited and removed ratings to other users", 19, 42,
+        function() A:OnCommunicationSettingsChanged() end)
+    p.receiveRatingBroadcasts = checkbox(communication, "receiveRatingBroadcasts",
+        "Receive and save rating announcements from other users", 19, 77,
+        function() A:OnCommunicationSettingsChanged() end)
+    label(communication, "GameFontHighlightSmall", "Maximum direct peers per lookup", 55, -120, 390)
+    p.lookupPeerValue = label(communication, "GameFontNormal", "", 460, -120, 150, "RIGHT")
+    p.lookupPeerCount = CreateFrame("Slider", "RateMeLookupPeerCount", communication, "OptionsSliderTemplate")
+    p.lookupPeerCount:SetPoint("TOPLEFT", communication, "TOPLEFT", 61, -148)
+    p.lookupPeerCount:SetSize(340, 19)
+    p.lookupPeerCount:SetMinMaxValues(1, 20)
+    p.lookupPeerCount:SetValueStep(1)
+    if p.lookupPeerCount.SetObeyStepOnDrag then p.lookupPeerCount:SetObeyStepOnDrag(true) end
+    local sliderName = p.lookupPeerCount:GetName()
+    if sliderName then
+        if _G[sliderName .. "Low"] then _G[sliderName .. "Low"]:SetText("1") end
+        if _G[sliderName .. "High"] then _G[sliderName .. "High"]:SetText("20") end
+        if _G[sliderName .. "Text"] then _G[sliderName .. "Text"]:SetText("") end
+    end
+    p.lookupPeerCount:SetScript("OnValueChanged", function(self, value)
+        local rounded = math.max(1, math.min(20, math.floor(value + 0.5)))
+        if math.abs(value - rounded) > 0.001 then self:SetValue(rounded); return end
+        if A.db.settings.lookupPeerCount ~= rounded then A:SetSetting("lookupPeerCount", rounded) end
+        p.lookupPeerValue:SetText(tostring(rounded))
+    end)
+    local networkHint = label(communication, "GameFontDisableSmall",
+        "Peers may forward lookups. Broadcast reach depends on available game channels.", 55, -190, 580)
+
+    local diagnostics = section(1416, 90, "Diagnostics")
     p.debug, p.debugRow, p.debugLabel = checkbox(diagnostics,
         "debug", "Show rating and peer-to-peer activity in chat (debug)", 19, 51)
 
@@ -525,6 +555,10 @@ function A:DrawSettings()
     local settings = self.db.settings
     p.allCharacters:SetChecked(settings.allCharacters)
     p.debug:SetChecked(settings.debug)
+    p.sendRatingBroadcasts:SetChecked(settings.sendRatingBroadcasts)
+    p.receiveRatingBroadcasts:SetChecked(settings.receiveRatingBroadcasts)
+    p.lookupPeerCount:SetValue(settings.lookupPeerCount or 7)
+    p.lookupPeerValue:SetText(tostring(settings.lookupPeerCount or 7))
     p.enabled:SetChecked(settings.lowRatingAlerts)
     p.alertPersonal:SetChecked(settings.lowRatingPersonal)
     p.alertCommunity:SetChecked(settings.lowRatingCommunity)

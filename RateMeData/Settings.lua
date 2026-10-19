@@ -7,6 +7,11 @@ function A:InitializeStorage()
     local db = Store:Open(self.protocol, self:Stamp(), self.MAX_RECENT)
     self.db, self.data = db, db -- two runtime aliases to ONE persisted table
     local settings = db.settings
+    if type(settings.receiveRatingBroadcasts) ~= "boolean" then settings.receiveRatingBroadcasts = true end
+    if type(settings.sendRatingBroadcasts) ~= "boolean" then settings.sendRatingBroadcasts = true end
+    local peers = tonumber(settings.lookupPeerCount)
+    if not peers or peers ~= peers or peers == math.huge or peers == -math.huge then peers = 7 end
+    settings.lookupPeerCount = math.max(1, math.min(20, math.floor(peers)))
     if type(settings.hideCommentsByDefault) ~= "boolean" then settings.hideCommentsByDefault = false end
     if type(settings.debug) ~= "boolean" then settings.debug = false end
     if settings.allCharacters == nil then settings.allCharacters = false end
@@ -63,6 +68,12 @@ end
 function A:SetSetting(key, value)
     if type(key) ~= "string" or not self.db or type(self.db.settings) ~= "table"
         or self.db.settings[key] == nil then return false end
+    if key == "lookupPeerCount" then
+        if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then return false end
+        value = math.max(1, math.min(20, math.floor(value)))
+    elseif key == "receiveRatingBroadcasts" or key == "sendRatingBroadcasts" then
+        if type(value) ~= "boolean" then return false end
+    end
     self.db.settings[key] = value
     return true
 end

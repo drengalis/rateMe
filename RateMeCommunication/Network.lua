@@ -6,7 +6,6 @@ local MAX_QUEUE = 180
 local MAX_HOPS = 2
 local MAX_FANOUT = 3
 local MAX_COMMENT_REQUESTS = 20
-local MAX_QUERY_SEEDS = 7     -- 7 * (1 + 3 + 9) = 91 theoretical query recipients
 local INITIAL_QUERY_SEEDS = 3
 local EXPANSION_QUERY_SEEDS = 3
 local MIN_SAMPLE_TO_STOP_EXPANDING = 5
@@ -66,6 +65,7 @@ function A:FlushMessages()
     local job = self.outbox[1]
     if self:Now() < job.due then return end
     table.remove(self.outbox, 1)
+    if job.message:sub(1, 2) == "B|" and self.db.settings.sendRatingBroadcasts == false then return end
     local fn = job.logged and C_ChatInfo.SendAddonMessageLogged or C_ChatInfo.SendAddonMessage
     if type(fn) ~= "function" then
         self:Debug("Could not send an addon message: the required game messaging function is unavailable.")
@@ -194,14 +194,15 @@ function A:ActiveQueries()
 end
 
 -- Each root seed causes at most 1 + 3 + 9 recipients under the two-hop,
--- three-way forwarding rule. Seven seeds therefore bound an honest lookup to
--- at most 91 unique query recipients (plus at most 100 direct vote responses).
+-- three-way forwarding rule. The configurable 1-20 root peers yield up to
+-- 13-260 query recipients (plus at most 100 direct vote responses).
 -- Group/guild messages are discovery-only, never rating-query broadcasts.
 function A:SendQueryWave(id, maximum)
     local request = self.runtime.requests[id]
     if not request or request.expires <= self:Now() then return 0 end
-    if request.seedCount >= MAX_QUERY_SEEDS then return 0 end
-    local remaining = math.min(maximum, MAX_QUERY_SEEDS - request.seedCount)
+    local budget = self:GetLookupPeerCount()
+    if request.seedCount >= budget then return 0 end
+    local remaining = math.min(maximum, budget - request.seedCount)
     local selected = self:SelectQueryPeers(id .. ":" .. request.seedCount,
         nil, self.myName, remaining, request.seeded)
     local sent = 0
@@ -260,10 +261,8 @@ function A:Query(target, force)
     C_Timer.After(9 + jitter(0.6), function()
         local r = self.runtime.requests[id]
         if r and self:QueryVoteCount(r) < MIN_SAMPLE_TO_STOP_EXPANDING then
-            -- If the first wave had no reachable peers, reuse its unused seed
-            -- allowance rather than penalizing a newly joined addon client.
-            local unusedInitial = math.max(0, INITIAL_QUERY_SEEDS - math.min(r.seedCount, INITIAL_QUERY_SEEDS))
-            if self:SendQueryWave(id, 1 + unusedInitial) > 0 then self:BumpNetworkStat("expansions") end
+            -- Use the remaining configured root budget in the final wave.
+            if self:SendQueryWave(id, self:GetLookupPeerCount() - r.seedCount) > 0 then self:BumpNetworkStat("expansions") end
         end
     end)
     C_Timer.After(self.QUERY_SECONDS + 0.2, function()
@@ -295,7 +294,11 @@ function A:FinishQuery(id)
     cache.votes = cache.votes or {}
     for key, revision in pairs(request.revisions) do
         local prior = cache.votes[key]
-        if not prior or revision >= prior.rev then cache.votes[key] = request.votes[key] end
+        local saved = self.db.community and self.db.community[guid]
+        saved = saved and saved.votes[key]
+        if (not saved or revision >= saved.rev) and (not prior or revision >= prior.rev) then
+            cache.votes[key] = request.votes[key]
+        end
     end
     local ownKey = self:Key(self.myName)
     cache.votes[ownKey] = request.votes[ownKey]
@@ -472,6 +475,7 @@ function A:OnMessage(prefix, message, channel, sender, logged)
     local canonical = self:CleanName(sender)
     if not canonical or self:Key(canonical) == self:Key(self.myName) then return end
     if type(channel) ~= "string" then return end
+    if message:sub(1, 2) == "B|" and self.db.settings.receiveRatingBroadcasts == false then return end
     if not self:AllowInbound(canonical) then return end
     local rawMessage = message
     local tag, decoded, args = self:DecodePacket(message, canonical)
@@ -491,7 +495,10 @@ function A:OnMessage(prefix, message, channel, sender, logged)
             .. ": it was not sent through the required logged channel.")
         return
     end
-    if tag == "H" and args and args[2] == self.protocol
+    if tag == "B" and not logged and (channel == "CHANNEL" or channel == "WHISPER"
+        or channel == "PARTY" or channel == "RAID" or channel == "INSTANCE_CHAT" or channel == "GUILD") then
+        self:HandleRatingBroadcast(args, canonical)
+    elseif tag == "H" and args and args[2] == self.protocol
         and (channel == "WHISPER" or channel == "PARTY" or channel == "RAID"
             or channel == "INSTANCE_CHAT" or channel == "GUILD") then
         local key = self:Key(canonical)
@@ -566,7 +573,10 @@ function A:InitializeNetwork()
     end
     local registered = C_ChatInfo.RegisterAddonMessagePrefix(self.prefix)
     if registered == false then self:Log("Unable to register addon message prefix.") end
+    self:EnsureBroadcastChannel()
     self.netFrame = CreateFrame("Frame")
+    self.netFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    self.netFrame:RegisterEvent("CHANNEL_UI_UPDATE")
     self.netFrame:RegisterEvent("CHAT_MSG_ADDON")
     self.netFrame:RegisterEvent("CHAT_MSG_ADDON_LOGGED")
     self.netFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
@@ -574,6 +584,8 @@ function A:InitializeNetwork()
     self.netFrame:SetScript("OnEvent", function(_, event, ...)
         if event == "CHAT_MSG_ADDON" or event == "CHAT_MSG_ADDON_LOGGED" then
             self:OnMessage(select(1, ...), select(2, ...), select(3, ...), select(4, ...), event == "CHAT_MSG_ADDON_LOGGED")
+        elseif event == "PLAYER_ENTERING_WORLD" or event == "CHANNEL_UI_UPDATE" then
+            self:EnsureBroadcastChannel()
         elseif event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_GUILD_UPDATE" then
             self:Discovery()
             if event == "GROUP_ROSTER_UPDATE" then self:OnGroupRosterUpdate() end
@@ -588,7 +600,7 @@ function A:InitializeNetwork()
             if deadline < self:Now() then self.runtime.seen[id] = nil end
         end
     end)
-    C_Timer.NewTicker(15, function() self:PruneInbound() end)
+    C_Timer.NewTicker(15, function() self:PruneInbound(); self:EnsureBroadcastChannel() end)
     C_Timer.After(3 + jitter(1.5), function() self:Discovery(); self:OnGroupRosterUpdate() end)
 end
 

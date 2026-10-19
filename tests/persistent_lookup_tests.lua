@@ -19,7 +19,7 @@ local function boot()
     function a:ValidateStoredTarget(t) return t.faction==self.myFaction end
     a:InitializeStorage()
     local communication={}
-    for _, name in ipairs({"Store","Payload","Diagnostics","Network"}) do
+    for _, name in ipairs({"Store","Payload","Diagnostics","Broadcasts","Network"}) do
         assert(loadfile(root.."RateMeCommunication/"..name..".lua"))("RateMeCommunication",communication)
     end
     communication:Bind(a)
