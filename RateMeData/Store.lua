@@ -32,10 +32,9 @@ function Store:Bind(addon)
     for key, value in pairs(self.API) do addon[key] = value end
     addon.CACHE_SECONDS = addon.CACHE_SECONDS or 900
     addon.MAX_RECENT = addon.MAX_RECENT or 150
-    addon.MAX_COMMENT = addon.MAX_COMMENT or 160
     -- Runtime views and request state also live here. Durable reviews are in
     -- db.community; monotonic timers and transport evidence stay session-only.
-    self.session = self.session or addon.runtime or {cache={}, requests={}, seen={}, comments={}}
+    self.session = self.session or addon.runtime or {cache={}, requests={}, seen={}}
     addon.runtime = self.session
     return addon
 end

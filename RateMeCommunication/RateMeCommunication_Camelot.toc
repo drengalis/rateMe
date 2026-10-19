@@ -9,4 +9,5 @@ Store.lua
 Payload.lua
 Diagnostics.lua
 Broadcasts.lua
+ReviewTags.lua
 Network.lua

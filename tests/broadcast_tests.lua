@@ -35,11 +35,11 @@ assert(not a:SetSetting('lookupPeerCount',0/0))
 assert(not a:SetSetting('receiveRatingBroadcasts','false'))
 local target={guid='Player-1-bb',name='Target-Realm',faction='Alliance',class='MAGE'}
 a:RememberPeer('Alice-Realm')
-assert(a:SaveOwnRating(target,5,'private comment'))
-assert(a:SaveOwnRating(target,4,'new private comment'))
+assert(a:SaveOwnRating(target,5,{1,7}))
+assert(a:SaveOwnRating(target,4,{1,4}))
 assert(#pending==1) -- rapid edits coalesce
 pending[1]()
-assert(#a.outbox==3) -- shared channel, guild and known peer
+assert(#a.outbox==6) -- shared channel, guild and known peer
 local packet=a.outbox[1].message
 assert(packet:sub(1,4)=='B|1|' and not packet:find('private',1,true))
 assert(a.outbox[1].channel=='CHANNEL' and a.outbox[1].target==4)
@@ -101,5 +101,5 @@ GetChannelName=function()return 0 end
 local before=#a.outbox
 a.db.settings.sendRatingBroadcasts=true
 a:BroadcastOwnRating(a:GetOwnRating(target.guid))
-assert(joined==1 and #a.outbox==before+2)
+assert(joined==1 and #a.outbox==before+4)
 print('PASS: broadcast routes, coalescing, sender identity, settings, duplicates, tombstones, query race and unavailable channel')

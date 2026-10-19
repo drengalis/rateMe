@@ -12,7 +12,6 @@ function A:InitializeStorage()
     local peers = tonumber(settings.lookupPeerCount)
     if not peers or peers ~= peers or peers == math.huge or peers == -math.huge then peers = 7 end
     settings.lookupPeerCount = math.max(1, math.min(20, math.floor(peers)))
-    if type(settings.hideCommentsByDefault) ~= "boolean" then settings.hideCommentsByDefault = false end
     if type(settings.debug) ~= "boolean" then settings.debug = false end
     if settings.allCharacters == nil then settings.allCharacters = false end
     -- The minimap button is visible by default.

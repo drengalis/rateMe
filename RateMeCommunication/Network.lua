@@ -2,10 +2,9 @@ local _, Communication = ...
 local A = Communication.API
 
 local PREFIX = "RATEME"
-local MAX_QUEUE = 180
+local MAX_QUEUE = 360
 local MAX_HOPS = 2
 local MAX_FANOUT = 3
-local MAX_COMMENT_REQUESTS = 20
 local INITIAL_QUERY_SEEDS = 3
 local EXPANSION_QUERY_SEEDS = 3
 local MIN_SAMPLE_TO_STOP_EXPANDING = 5
@@ -43,11 +42,6 @@ function A:QueueSend(message, channel, target, logged)
         target = self:CleanName(target)
         if not target or self:Key(target) == self:Key(self.myName) then return false end
     end
-    -- Never silently fall back to unlogged transmission for user-written reviews.
-    if logged and (not C_ChatInfo or type(C_ChatInfo.SendAddonMessageLogged) ~= "function") then
-        self:Debug("Could not send a written review: this client does not support logged addon messages. Your review remains saved locally.")
-        return false
-    end
     if #self.outbox >= MAX_QUEUE then
         self:BumpNetworkStat("droppedQueue")
         self:DebugPacket("DROP/queue", message, channel, target)
@@ -65,7 +59,8 @@ function A:FlushMessages()
     local job = self.outbox[1]
     if self:Now() < job.due then return end
     table.remove(self.outbox, 1)
-    if job.message:sub(1, 2) == "B|" and self.db.settings.sendRatingBroadcasts == false then return end
+    if (job.message:sub(1,2)=="B|" or job.message:sub(1,6)=="T|1|-|")
+        and self.db.settings.sendRatingBroadcasts == false then return end
     local fn = job.logged and C_ChatInfo.SendAddonMessageLogged or C_ChatInfo.SendAddonMessage
     if type(fn) ~= "function" then
         self:Debug("Could not send an addon message: the required game messaging function is unavailable.")
@@ -235,8 +230,7 @@ function A:Query(target, force)
     if own and not own.removed and own.faction == self.myFaction and own.score >= 1 and own.score <= 5 then
         pending.votes[self:Key(self.myName)] = {
             sender = self.myName, score = own.score, date = own.date,
-            rev = own.rev, hasComment = own.comment and own.comment ~= "",
-            comment = own.comment or "", freshAt = t,
+            rev = own.rev, tags = own.tags, freshAt = t,
         }
     end
     self.runtime.requests[id] = pending
@@ -283,6 +277,8 @@ end
 function A:FinishQuery(id)
     local request = self.runtime.requests[id]
     if not request then return end
+    self.tagQueryHistory = self.tagQueryHistory or {}
+    self.tagQueryHistory[id] = {guid=request.guid, expires=self:Now()+20}
     self.runtime.requests[id] = nil
     if self.db and self.db.settings and self.db.settings.debug then
         local count = self:QueryVoteCount(request)
@@ -310,36 +306,9 @@ function A:FinishQuery(id)
     self:RememberTarget(target)
     self:SaveLookupSummary(guid, summary)
     self:NotifyUI()
-    if self.reviews and self.reviews:IsShown() and self.reviews.target
-        and self.reviews.target.guid == guid then
-        self:RequestComments(guid)
-        self:NotifyUI()
-    end
     self:RefreshTooltip(guid)
     if self.RefreshHighlights then self:RefreshHighlights() end
     if self.OnRatingQueryComplete then self:OnRatingQueryComplete(guid) end
-end
-
-function A:RequestComments(guid)
-    local cache = self.runtime.cache[guid]
-    if not cache or not cache.votes then return 0 end
-    local sent = 0
-    local t = self:Now()
-    for key, vote in pairs(cache.votes) do
-        if sent >= MAX_COMMENT_REQUESTS then break end
-        if not self.db.ignored[key] and vote.hasComment and not vote.comment
-            and not (vote.commentRequested and t - vote.commentRequested < 60) then
-            local id = self:NewRequestID()
-            self.runtime.comments[id] = {guid = guid, reviewer = key, expires = t + 15}
-            vote.commentRequested = t
-            if self:QueueSend(self:EncodePacket("C?", {id, guid}, vote.sender), "WHISPER", vote.sender) then
-                sent = sent + 1
-            else
-                self.runtime.comments[id] = nil
-            end
-        end
-    end
-    return sent
 end
 
 function A:HandleQuery(args, sender)
@@ -369,7 +338,8 @@ function A:HandleQuery(args, sender)
         local value = record.removed and 0 or tonumber(record.score)
         if value and value >= 0 and value <= 5 then
             self:QueueSend(self:EncodePacket("R", {id, guid, value, record.rev or 1,
-                record.date or self:Stamp(), (record.comment and #record.comment > 0) and 1 or 0}, origin), "WHISPER", origin)
+                record.date or self:Stamp(), 0}, origin), "WHISPER", origin)
+            self:QueueSend(self.payload:ReviewTags(id, guid, record.rev or 1, record.tags), "WHISPER", origin)
         end
     end
     if hops <= 0 then return end
@@ -380,7 +350,7 @@ function A:HandleQuery(args, sender)
 end
 
 function A:HandleRating(args, sender)
-    local id, guid, score, revision, date, hasComment = self.payload:RatingFields(args)
+    local id, guid, score, revision, date = self.payload:RatingFields(args)
     if not id then return end
     local request = self.runtime.requests[id]
     if not request or request.expires < self:Now() or request.guid ~= guid then return end
@@ -396,9 +366,10 @@ function A:HandleRating(args, sender)
         request.responseCount = request.responseCount + 1
     end
     -- Track tombstone revisions too; an old positive vote cannot revive a removal.
-    local vote = {score = score, rev = revision, date = date, hasComment = hasComment == 1,
+    local vote = {score = score, rev = revision, date = date,
         sender = self:CleanName(sender), freshAt = self:Now()}
     if not self:SaveCommunityRating(request.target, key, vote) then return end
+    self:ApplyPendingReviewTags(guid, key, vote)
     request.revisions[key] = revision
     if score == 0 then
         request.votes[key] = nil
@@ -421,55 +392,6 @@ function A:HandleRating(args, sender)
     self:NotifyUI()
 end
 
-function A:HandleCommentRequest(args, sender)
-    local id, guid = self.payload:CommentRequestFields(args)
-    if not id or not self:UnderInboundLimit(sender, "C?", 4, 30) then return end
-    local record = self:GetOwnRating(guid)
-    if not record or record.removed or not record.comment or record.comment == "" then return end
-    local message = self:EncodePacket("C", {id, guid, record.rev or 1,
-        self:SanitizeComment(record.comment)}, sender)
-    self:QueueSend(message, "WHISPER", sender, true)
-end
-
-function A:HandleComment(args, sender, logged, rawMessage, canonicalMessage)
-    if not logged then return end
-    local id, guid, revision, comment = self.payload:CommentFields(args, self.MAX_COMMENT)
-    if not id then return end
-    local pending = id and self.runtime.comments[id]
-    if not pending or pending.expires < self:Now() or pending.guid ~= guid
-        or pending.reviewer ~= self:Key(sender) then return end
-    if self.db.ignored[pending.reviewer] then self.runtime.comments[id] = nil; return end
-    local cache = self.runtime.cache[guid]
-    local vote = cache and cache.votes[self:Key(sender)]
-    if not vote or not vote.hasComment or vote.rev ~= revision then return end
-    -- The direct rating sender and logged comment sender must be identical.
-    -- Never accept an author identity carried in a comment payload or from a relay.
-    local author = self:CleanName(sender)
-    if not author or self:Key(vote.sender) ~= self:Key(author) then return end
-    -- Newlines are permitted in comments; other control characters and WoW
-    -- markup delimiters are not. They remain authenticated to the logged sender.
-    if type(rawMessage) ~= "string" then return end
-    local safeComment = self:SanitizeComment(comment)
-    if safeComment == "" then return end
-    self.runtime.comments[id] = nil
-    vote.comment = safeComment
-    self:SaveCommunityComment(guid, self:Key(sender), vote)
-    -- Store evidence from CHAT_MSG_ADDON_LOGGED rather than an editable rater
-    -- field in the packet. Only this captured sender can be reported.
-    if self.db and self.db.settings and self.db.settings.debug then
-        self:Debug("Received and verified a written review from " .. self:DisplayName(author)
-            .. ". The review text is hidden from diagnostics.")
-    end
-    vote.commentSource = {
-        sender = author, targetGUID = guid, revision = revision,
-        receivedAt = self:Stamp(), logged = true,
-        -- Preserve the actual logged packet for reporting; the canonical form
-        -- was validated by the codec at receipt, never claimed by its sender.
-        payload = rawMessage, canonicalPayload = canonicalMessage,
-    }
-    self:NotifyUI()
-end
-
 function A:OnMessage(prefix, message, channel, sender, logged)
     if prefix ~= PREFIX or type(message) ~= "string" or #message > 255 then return end
     local canonical = self:CleanName(sender)
@@ -485,19 +407,13 @@ function A:OnMessage(prefix, message, channel, sender, logged)
     end
     self:DebugPacket("RX", rawMessage, channel, canonical)
     message = decoded
-    if logged and tag ~= "C" then
-        self:Debug("Ignored the message from " .. self:DisplayName(canonical)
-            .. ": only written reviews should use logged addon messages.")
-        return
-    end
-    if not logged and tag == "C" then
-        self:Debug("Ignored a written review from " .. self:DisplayName(canonical)
-            .. ": it was not sent through the required logged channel.")
-        return
-    end
+    if logged then return end -- Written-comment transport is no longer used.
     if tag == "B" and not logged and (channel == "CHANNEL" or channel == "WHISPER"
         or channel == "PARTY" or channel == "RAID" or channel == "INSTANCE_CHAT" or channel == "GUILD") then
         self:HandleRatingBroadcast(args, canonical)
+    elseif tag == "T" and (channel == "CHANNEL" or channel == "WHISPER"
+        or channel == "PARTY" or channel == "RAID" or channel == "INSTANCE_CHAT" or channel == "GUILD") then
+        self:HandleReviewTags(args, canonical)
     elseif tag == "H" and args and args[2] == self.protocol
         and (channel == "WHISPER" or channel == "PARTY" or channel == "RAID"
             or channel == "INSTANCE_CHAT" or channel == "GUILD") then
@@ -556,10 +472,7 @@ function A:OnMessage(prefix, message, channel, sender, logged)
         self:HandleQuery(args, canonical)
     elseif tag == "R" and channel == "WHISPER" then
         self:HandleRating(args, canonical)
-    elseif tag == "C?" and channel == "WHISPER" then
-        self:HandleCommentRequest(args, canonical)
-    elseif tag == "C" and channel == "WHISPER" then
-        self:HandleComment(args, canonical, logged, rawMessage, message)
+
     end
 end
 
@@ -578,11 +491,10 @@ function A:InitializeNetwork()
     self.netFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     self.netFrame:RegisterEvent("CHANNEL_UI_UPDATE")
     self.netFrame:RegisterEvent("CHAT_MSG_ADDON")
-    self.netFrame:RegisterEvent("CHAT_MSG_ADDON_LOGGED")
     self.netFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
     self.netFrame:RegisterEvent("PLAYER_GUILD_UPDATE")
     self.netFrame:SetScript("OnEvent", function(_, event, ...)
-        if event == "CHAT_MSG_ADDON" or event == "CHAT_MSG_ADDON_LOGGED" then
+        if event == "CHAT_MSG_ADDON" then
             self:OnMessage(select(1, ...), select(2, ...), select(3, ...), select(4, ...), event == "CHAT_MSG_ADDON_LOGGED")
         elseif event == "PLAYER_ENTERING_WORLD" or event == "CHANNEL_UI_UPDATE" then
             self:EnsureBroadcastChannel()
@@ -593,14 +505,11 @@ function A:InitializeNetwork()
     end)
     C_Timer.NewTicker(CHUNK_DELAY, function()
         self:FlushMessages()
-        for id, item in pairs(self.runtime.comments) do
-            if item.expires < self:Now() then self.runtime.comments[id] = nil end
-        end
         for id, deadline in pairs(self.runtime.seen) do
             if deadline < self:Now() then self.runtime.seen[id] = nil end
         end
     end)
-    C_Timer.NewTicker(15, function() self:PruneInbound(); self:EnsureBroadcastChannel() end)
+    C_Timer.NewTicker(15, function() self:PruneInbound(); self:PruneReviewTags(); self:EnsureBroadcastChannel() end)
     C_Timer.After(3 + jitter(1.5), function() self:Discovery(); self:OnGroupRosterUpdate() end)
 end
 

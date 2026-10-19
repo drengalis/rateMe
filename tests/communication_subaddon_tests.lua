@@ -31,14 +31,14 @@ assert(tag=='R' and args[4]=='5')
 communication:Bind(a)
 assert(a.payload.owner==a)
 a:InitializeNetwork()
-assert(registered=='RATEME' and a.netFrame.events.CHAT_MSG_ADDON_LOGGED)
+assert(registered=='RATEME' and a.netFrame.events.CHAT_MSG_ADDON)
 local rx,discovery,groups=0,0,0
 function a:OnMessage(prefix,message,channel,sender,logged)
- assert(prefix=='RATEME' and sender=='Alice' and logged==true);rx=rx+1
+ assert(prefix=='RATEME' and sender=='Alice' and logged==false);rx=rx+1
 end
 function a:Discovery()discovery=discovery+1 end
 function a:OnGroupRosterUpdate()groups=groups+1 end
-a.netFrame.OnEvent(a.netFrame,'CHAT_MSG_ADDON_LOGGED','RATEME','test','WHISPER','Alice')
+a.netFrame.OnEvent(a.netFrame,'CHAT_MSG_ADDON','RATEME','test','WHISPER','Alice')
 a.netFrame.OnEvent(a.netFrame,'GROUP_ROSTER_UPDATE')
 assert(rx==1 and discovery==1 and groups==1)
 -- Alternate manifests declare the same files and dependencies.

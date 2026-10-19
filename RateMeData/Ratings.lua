@@ -11,52 +11,18 @@ function A:GetOwnRating(guid)
 end
 
 
-function A:UTF8SafeCut(text, maxBytes)
-    -- Prevent truncated multibyte sequences (Lua 5.1 has no native utf8 library).
-    local result = text:sub(1, maxBytes)
-    while #result > 0 do
-        local valid = true
-        local i = 1
-        while i <= #result do
-            local x = result:byte(i)
-            local count = (x < 128 and 1) or (x >= 194 and x <= 223 and 2)
-                or (x >= 224 and x <= 239 and 3) or (x >= 240 and x <= 244 and 4) or 0
-            if count == 0 or i + count - 1 > #result then valid = false; break end
-            if count > 1 then
-                for j = i + 1, i + count - 1 do
-                    local b = result:byte(j)
-                    if b < 128 or b > 191 then valid = false; break end
-                end
-                if not valid then break end
-            end
-            i = i + count
-        end
-        if valid then return result end
-        result = result:sub(1, -2)
-    end
-    return ""
-end
-
-function A:SanitizeComment(value)
-    if type(value) ~= "string" then return "" end
-    -- Preserve intentional line breaks in multi-line reviews, but remove all
-    -- other control characters and WoW markup delimiters (links/textures).
-    value = value:gsub("\r\n", "\n"):gsub("\r", "\n")
-    value = value:gsub("|", ""):gsub("[%z\1-\9\11-\31\127]", " ")
-    return self:UTF8SafeCut(value, self.MAX_COMMENT)
-end
-
-
-function A:SaveOwnRating(target, score, comment)
+function A:SaveOwnRating(target, score, tags)
     if not self:ValidateStoredTarget(target) then return false, "Invalid or opposing-faction target" end
     if type(score) ~= "number" or score ~= math.floor(score) or score < 1 or score > 5 then
         return false, "Choose a rating from 1 to 5"
     end
+    local encoded = self:EncodeReviewTags(tags)
+    if not encoded then return false, "Choose up to three valid, non-conflicting tags" end
     local records = self:OwnRatings()
     local prior = records[target.guid]
     records[target.guid] = {
         guid = target.guid, name = target.name, faction = target.faction, class = target.class,
-        score = score, comment = self:SanitizeComment(comment), date = self:Stamp(),
+        score = score, tags = encoded, date = self:Stamp(),
         rev = (prior and tonumber(prior.rev) or 0) + 1,
     }
     self:RememberTarget(target)
@@ -79,7 +45,7 @@ function A:DeleteOwnRating(target)
     if not prior then return false end
     records[target.guid] = {
         guid = target.guid, name = target.name, faction = target.faction, class = target.class,
-        removed = true, score = 0, comment = "", date = self:Stamp(),
+        removed = true, score = 0, tags = "", date = self:Stamp(),
         rev = (tonumber(prior.rev) or 0) + 1,
     }
     self:NotifyUI()

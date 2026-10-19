@@ -22,7 +22,7 @@ A:DebugPacket('RETRY/throttled','Q|id|guid|Peer|0','WHISPER','Peer-Realm')
 A:DebugPacket('IGNORE/invalid-or-unsupported','X|27|private-codec-body','WHISPER','Peer-Realm')
 contains('Sent a rating lookup request to Peer Realm (direct message)')
 contains('Received a rating reply from Peer Realm (direct message)')
-contains('Received a written review from Peer Realm')
+contains('Received a unrecognized addon message from Peer Realm')
 contains('Received a new-format addon message (format 2; contents hidden) from Peer Realm')
 contains('outgoing message queue is full')
 contains('The game is limiting addon messages')
@@ -44,7 +44,7 @@ A.myFaction='Alliance'; A.myGuid='Player-1-FF'; A.Stamp=function()return 1792368
 A.ValidateStoredTarget=function()return true end; A.RememberTarget=function()end
 A.NotifyUI=function()end; A.OwnRatings=function()return A.db.authored end
 A.db.authored={}
-assert(A:SaveOwnRating({guid='Player-1-CC',name='Target-Realm',faction='Alliance'},5,'private review text'))
+assert(A:SaveOwnRating({guid='Player-1-CC',name='Target-Realm',faction='Alliance'},5,{1,7}))
 contains('Saved your rating for Target Realm: 5 out of 5 stars (update 1)')
 assert(#sends==1 and not joined():find('private review text',1,true))
 assert(A:DeleteOwnRating({guid='Player-1-CC',name='Target-Realm',faction='Alliance'}))

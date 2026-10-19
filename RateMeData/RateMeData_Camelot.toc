@@ -7,6 +7,7 @@
 
 Store.lua
 Settings.lua
+Tags.lua
 Ratings.lua
 Community.lua
 Peers.lua

@@ -13,7 +13,9 @@ GameTooltip.lines={}
 function GameTooltip:AddLine(text)table.insert(self.lines,text)end
 local store={}
 assert(loadfile('RateMeData/Community.lua'))('RateMeData',{API=store})
+assert(loadfile('RateMeData/Tags.lua'))('RateMeData',{API=store})
 local a={IsCommunityReviewVerified=store.IsCommunityReviewVerified,myName='Me',db={ignored={}},runtime={cache={}}}
+for k,v in pairs(store)do if a[k]==nil then a[k]=v end end
 function a:Key(n)return n:lower()end
 function a:DisplayName(n)return n end
 function a:DateText(n)return 'LOCAL '..tostring(n)..' PM' end

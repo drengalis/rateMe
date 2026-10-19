@@ -7,7 +7,6 @@
 
 Core.lua
 Storage.lua
-CommentSafety.lua
 Communication.lua
 Alerts.lua
 Highlights.lua

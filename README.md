@@ -1,162 +1,58 @@
-# Rate Me!
+# Rate Me! — WoW Forever
 
-**A player-rating addon for World of Warcraft Forever**  
-**Addon version:** 1 · **Status:** Beta — in-game testing is ongoing
-
-Rate Me! lets you remember the players you've enjoyed grouping with (and those you haven't). Give friendly players a **1–5 star rating**, leave an optional comment, see available community ratings, and receive configurable warnings when a low-rated player joins your group.
-
-Everything runs inside WoW. You do **not** need an account, website, or external service.
+Rate friendly, same-faction players with 1–5 stars and up to three predefined tags. Reputation earned. Reputation shared.
 
 ## Installation
 
-1. Download this repository using **Code → Download ZIP**, then extract it.
-2. Copy **RateMe**, **RateMeData**, and **RateMeCommunication** into your WoW Forever `Interface/AddOns` directory. Keep `RateMe/Media` intact.
-3. Each folder must contain its matching `.toc` file directly, for example `Interface/AddOns/RateMeCommunication/RateMeCommunication.toc`.
-4. Enable **Rate Me!**, **Rate Me! Data**, and **Rate Me! Communication** in the character-selection AddOns menu, then enter the game.
-5. Click the gold star on your minimap, or type **\`/rateme\`**.
+Copy all three folders into Interface/AddOns: **RateMe**, **RateMeData**, and **RateMeCommunication**. Keep RateMe/Media intact and enable all three addons. Reload once after replacing files. Use `/rateme`, the minimap star, or a friendly player's context menu.
 
-When updating, replace all three installed addon folders. The companion addon owns all persistent records in the `RateMeDB` SavedVariables table, saved by WoW in `SavedVariables/RateMeData.lua`. This unreleased storage layout starts with a fresh database and has no import or migration from earlier previews. Reload the game UI **once after replacing addon files**; you do **not** need to reload after rating someone or changing settings.
+## Reviews and tags
 
-## Get started
+Written comments have been removed. In the rating editor, click **Add Tag** to open separate Positive and Negative lists. Select up to three tags TOTAL, mixing either type. Selected tags appear beneath your rating with an X to remove each. Positive labels use a green + prefix; negative labels use a red - prefix. Direct opposites are mutually exclusive. The post-party rating editor uses the same selector. Community Reviews shows each author's tags and a Hide tags/Show tags control for that reviewer.
 
-### Rate a player
+### Permanent IDs
 
-Right-click an eligible friendly player and select **Rate Me!**. You can also target them and type \`/rateme target\`.
+The authoritative registry is RateMeData/Tags.lua. IDs MUST NEVER be renumbered, reassigned or reused. Retire entries in place with retired=true; never delete their definitions. Preserve the encoder alphabet and ID-to-byte mapping. IDs do not depend on picker order or display text. Gaps are reserved for future additions. If the encoding capacity is exhausted, introduce a new encoding rather than reuse old IDs.
 
-In the rating window:
+| ID | Positive | ID | Negative |
+|---:|---|---:|---|
+| 1 | +Leader | 33 | -Ninja Looter |
+| 2 | +Team Player | 34 | -Toxic |
+| 3 | +Helpful | 35 | -Griefer |
+| 4 | +Skilled | 36 | -Frequently AFK |
+| 5 | +Reliable | 37 | -Abandons Groups |
+| 6 | +Patient | 38 | -Uncooperative |
+| 7 | +Fair Looter | 39 | -Ignores Mechanics |
+| 8 | +Good Communicator | 40 | -Reckless Pulls |
+| 9 | +Well Prepared | 41 | -Unprepared |
+| 10 | +Knows Mechanics | 42 | -Poor Communication |
+| 11 | +Protects Teammates | 43 | -Breaks Crowd Control |
+| 12 | +Good Sportsmanship | 44 | -Disrespects Loot Rules |
 
-- Choose **1 to 5 stars**.
-- Optionally add a short comment (up to **160 UTF-8 bytes**).
-- See **your existing rating** alongside the **available community rating**.
-- Save, edit, or remove your own rating whenever you like.
+## Storage and verification
 
-Only **friendly, same-faction player characters** are eligible. You cannot rate yourself, opposing-faction players, NPCs, or pets. The player being rated does **not** need to have Rate Me! installed for you to save your personal review.
+RateMeData exclusively owns RateMeDB, saved by WoW in WTF/Account/<Account>/SavedVariables/RateMeData.lua. Personal reviews and received community records persist across logout/reload. One record is kept per target/reviewer; newer revisions replace older records, and deletions retain tombstones. Missing/offline authors do not erase cached reviews. Recent Lookups is capped at 150 identities; pruning that list does not erase review records. Persistent community storage has no automatic age/count eviction.
 
-### See ratings at a glance
+A complete tag selection is stored in a single string of 0–3 ASCII bytes, one permanent ID per character, without repeating labels or colours. An empty string means the author selected no tags; a missing field means no tag metadata has arrived. Invalid, duplicate, excessive and contradictory tags are rejected.
 
-Hover over an eligible party or raid member to see their available community stars and review count in their tooltip. The addon uses its recent local results immediately and refreshes stale information when possible.
+The green Verified author label means the rating was received directly from its original author's authenticated WoW sender. This source status survives reloads; freshness is tracked separately for 15 minutes within the session. Cached reviews remain visible but do not count as fresh for alerts/highlights. Verification is not a cryptographic signature, a guarantee of truthful reviews, or protection from edits to a user's own SavedVariables.
 
-In Rate Me! windows, scores show **five full, half, or empty stars**, followed closely by the numeric average rounded to **one decimal place**. Individual star icons round to the nearest half-star; the stored score is not rounded for calculations.
+No import, comment conversion, database migration or settings migration is included in this unreleased format. No old comments are converted into tags. Addon and protocol versions remain 1; prefix remains RATEME.
 
-### Browse your ratings
+## Communication
 
-Open \`/rateme\` or click the minimap star:
+Settings > Communication controls maximum direct peers per lookup (1–20, default 7) and independent send/receive broadcast toggles (both default ON). Lookup waves may stop expanding after sufficient replies. Each root peer can forward under the existing two-hop, three-way bound; default seven roots give at most 91 honest query recipients, with a 100-reviewer response cap. Queries expire after about 15 seconds. Paging and search do not generate lookups.
 
-| Tab | What you'll find |
-| --- | --- |
-| **My Ratings** | Everyone you've personally rated. Select a player to view, edit, or remove your review. |
-| **Recent Lookups** | Players whose community ratings you've recently checked. Select one to view details or refresh their rating. |
-| **Settings** | Group warnings, rating highlights, post-party reminders, comment visibility, and minimap preferences. |
+New/edited/removed ratings coalesce for three seconds before announcement. Broadcasts attempt the temporary RateMeNet custom addon channel, guild/group routes and recently confirmed peers (directory capped at 120). Forever channel/realm restrictions, unavailable users, throttling and bounded queues can prevent delivery; successful enqueue does not prove receipt. There is no guaranteed global channel, external service or ordinary-chat payload fallback. Send/receive preferences apply independently; disabling broadcasts does not disable explicit lookups.
 
-You can search both lists. They are always sorted by **date, newest first**. Recent Lookups retains up to **150** player entries and can show older results as **cached** rather than live.
+Legacy numeric R and B|1 shapes are unchanged, with the former comment-present flag always zero. The additive T|1 packet carries a request ID (or - for broadcasts), target GUID, revision and at most three encoded tag bytes. Old clients ignore T and continue exchanging numeric ratings. Tags are attached only to a directly verified record from the SAME sender at the SAME revision. Lookup tag packets must match an active/recent query; broadcast tag packets respect the receive toggle. Bounded, short-lived buffering handles reordered score/tag packets. Duplicate/conflicting same-revision metadata and stale updates are rejected. No comments are stored, requested, displayed or transmitted by this build.
 
-The main window, rating editor, and reviews window arrange themselves side by side where space permits. They have opaque backgrounds and can be moved. Press **Escape** to close the most recently opened Rate Me! window.
+## Other features
 
-### Rate your party when it ends
+My Ratings and Recent Lookups have search, a clear button and 20-player pages. Settings includes account-character filtering, group rating alerts, frame glows, nameplate rating stars, post-party prompts, minimap controls, communication and optional readable diagnostics. Indicators are opt-in; personal ratings remain locally available. Displayed timestamps use local time with AM/PM; stored timestamps are UTC-based epoch seconds.
 
-When you leave or disband a normal **party**, Rate Me! can show **Rate Your Party** with the eligible players encountered during that party, even if someone left early. Add stars and optional comments to several players, then choose **Save Ratings**.
+## Architecture and tests
 
-- Existing ratings/comments are prefilled; unchanged entries are skipped.
-- Select **Not Now** or press **Escape** to dismiss it.
-- The automatic prompt is **on by default** and can be disabled in Settings.
-- This does **not** appear after a raid.
-- Use \`/rateme party\` to reopen your last party's list during the same game session.
+RateMe owns UI and game integration. RateMeData owns data classes, storage, settings, review tags and the permanent registry. RateMeCommunication owns payloads, transport, discovery, broadcasts and tag-message validation. Its companion is dormant until RateMe binds and initializes it. Neither RateMe nor RateMeCommunication declares SavedVariables.
 
-## Settings
-
-Open \`/rateme\` → **Settings**. Your selections are saved automatically, without needing \`/reload\`.
-
-| Setting | What it does | Default |
-| --- | --- | --- |
-| **Group Rating Alerts** | Warn when someone joins your group with a personal and/or community rating at or below your selected threshold. Each source has its **own 1.0–5.0** threshold, adjustable in half-star steps. | Off; thresholds 3.0 |
-| **Player Rating Highlights** | Add a soft **gold** glow for ratings **4.0+**, or **red** for ratings **below 2.0**, on supported nameplates and Blizzard group frames. Choose personal and community rating sources independently. Red wins if they disagree. | Off |
-| **Post-Party Ratings** | Offer the batch-rating window after leaving a party (not a raid). | On |
-| **Comment Safety — Hide written reviews by default** | Keep written reviews concealed until you choose **Show**. | Off |
-| **Minimap Button** | Show or hide the gold star; drag it around the minimap to set its position. | Shown |
-
-**Personal ratings** are always available locally. **Community warnings and highlights** require a fresh sample of directly received votes, not an old cached score. A player with no available qualifying score will not trigger a warning or glow.
-
-Nameplate customization may be limited by the WoW client in dungeons and raids. Highlights are a local visual effect, **not** an actual 3D aura around the character.
-
-## Comments and reporting
-
-Open a player's **Community Reviews** to request available written comments. They are fetched only when you open the reviews window; some may be unavailable if their authors are offline.
-
-For each received comment, you can:
-
-- **Show/Hide** the text.
-- **Block/Unblock** the reviewer locally. This hides their comments and stops requesting additional ones, but **does not** alter their numeric contribution to the community rating.
-- Choose **Report** to see guidance identifying the **verified comment author**, not the player being reviewed.
-
-**Report does not automatically submit a ticket or in-game report.** It provides attribution and instructions so you can make a report through Blizzard's supported process. It is available only when the comment has verifiable logged-message evidence.
-
-Rate Me! has **no custom profanity dictionary** and does not claim to apply Blizzard's chat language filter inside its review windows. Comments are sanitized to prevent WoW formatting/control characters from being rendered. Written comments use Blizzard's logged addon-message transport when available; if that transport is unavailable, comments cannot be transferred.
-
-## Minimap and slash commands
-
-The gold minimap star opens or closes the addon on **left-click**. **Left-drag** it to move it; the position persists after logout.
-
-| Command | Action |
-| --- | --- |
-| \`/rateme\` | Open or close the main window |
-| \`/rateme target\` | Rate your current eligible target |
-| \`/rateme reviews\` | View reviews for your current target |
-| \`/rateme party\` | Reopen the last party's batch-rating window this session |
-| \`/rateme minimap\` | Toggle the minimap button |
-| \`/rateme minimap show\` | Show the minimap button |
-| \`/rateme minimap hide\` | Hide the minimap button |
-| \`/rateme peers\` | Show the number of currently known peers |
-| \`/rateme debug\` | Toggle diagnostic messages |
-
-If you hide the minimap button, **\`/rateme\` always remains available**.
-
-## How community ratings work
-
-Rate Me! uses an **on-demand peer-to-peer network** through WoW's built-in addon messaging. There is **no central ratings database or outside server**. Optional rating announcements use the RateMeNet custom addon channel alongside guild/group and confirmed-peer routes.
-
-When you look up a player, your client asks reachable addon users for ratings. A review only counts in a fresh community sample if it is received **directly from its original reviewer**; another player's copied local ratings are not accepted as authoritative. Identical reviewer responses are counted once.
-
-This means:
-
-- The displayed community score is based on **available verified replies**, **not** every rating ever submitted.
-- Review counts can change as people connect, disconnect, or become unreachable.
-- Recent results can be displayed from cache but are labeled as such when stale.
-- You can still create and edit **your own** ratings while offline from the rating network.
-- A modified addon or multiple legitimate characters cannot be completely prevented from submitting deceptive personal reviews.
-
-Rate Me! is intended to be a helpful personal/community reference, not a definitive verdict about another player.
-
-## Troubleshooting
-
-**I don't see Rate Me! in the AddOns list.** Make sure `RateMe/RateMe.toc`, `RateMeData/RateMeData.toc`, and `RateMeCommunication/RateMeCommunication.toc` exist directly under `Interface/AddOns`, rather than an extra nested \`rateMe-main/RateMe\` folder. Keep the \`Media\` files with the addon.
-
-**The stars show empty squares or missing artwork.** Reinstall all three addon folders, including the whole \`RateMe\` folder, including \`Media\`. Rate Me! uses bundled star textures rather than Unicode star characters.
-
-**A player has no community rating.** This can simply mean no reachable online reviewers have replied. Your personal ratings still work.
-
-**I hid the minimap icon.** Type \`/rateme minimap show\` or open \`/rateme\` → Settings.
-
-**Nothing happens after leaving a group.** The batch prompt applies to ordinary parties, not raids. Check **Post-Party Ratings** in Settings; if you left during combat, the popup waits until combat ends.
-
-**Need to verify compatibility or report an issue?** See [the in-game testing checklist](RateMe/TESTING.md) and open a [GitHub issue](https://github.com/drengalis/rateMe/issues) with your WoW Forever client version, steps to reproduce, and any relevant error text. Avoid posting other players' private information or abusive comment text in public issues.
-
----
-
-*Rate Me! is a community addon. Version 1 is currently a beta; actual WoW Forever client and multi-client compatibility testing is ongoing.*
-
-## Data companion
-
-`RateMeData` is a required companion addon. It owns the single account-wide `RateMeDB` SavedVariables table, personal ratings, preferences, community history, peers, reviewer blocks, and data classes. `RateMe` declares `## Dependencies: RateMeData, RateMeCommunication` and does not declare a separate SavedVariables table. All three addon folders must be installed side by side. The storage design is unreleased and intentionally has no legacy import or migration code.
-
-
-
-## Current addon layout
-
-Install all three folders together: **RateMe**, **RateMeData**, and **RateMeCommunication**. RateMeData owns RateMeDB; received reviews and fetched comments now persist across sessions and merge by reviewer/revision. Confirmed deletions are retained. A green Verified author label identifies reviews received directly from their author; source verification persists independently of freshness. Cached records do not automatically count as fresh for alerts. RateMeCommunication owns payloads, transport, discovery, throttling, lookup routing and communication diagnostics. Version 1, protocol 1 and prefix RATEME are unchanged. This unreleased storage format includes no legacy migration.
-
-Run the Lua suites in tests/ from the repository root. See RateMe/TESTING.md for validation guidance. Install ZIPs exclude tests and TESTING.md.
-
-
-## Communication preferences
-
-Settings > Communication controls the maximum direct peers per lookup (1-20, default 7), sending rating announcements, and receiving/saving announcements. Both broadcast toggles default ON. Only announcements whose authenticated sender matches their claimed reviewer are marked verified. Numeric metadata is broadcast; comments remain on-demand. Delivery uses available custom-channel, guild/group and known-peer routes and cannot guarantee reaching every Forever addon user. See RateMe/README.md for scope and limits.
+Regression suites live only in tests/ in the GitHub repository; see RateMe/TESTING.md. Install ZIPs contain only the three addon folders and exclude tests and TESTING.md. In-game rendering and mixed-client delivery must also be tested in WoW Forever.

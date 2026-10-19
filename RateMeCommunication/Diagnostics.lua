@@ -7,7 +7,7 @@ local PACKET_NAMES = {
     B = "rating announcement", H = "peer discovery greeting", A = "peer discovery reply",
     P = "peer introduction", K = "supported message format announcement",
     Q = "rating lookup request", R = "rating reply",
-    ["C?"] = "written review request", C = "written review",
+    T = "review tags",
 }
 local CHANNEL_NAMES = {
     WHISPER = "direct message", PARTY = "party", RAID = "raid",

@@ -5,7 +5,7 @@ for path in files:lines() do assert(loadfile(path)); syntax=syntax+1 end
 files:close()
 local function boot()
     local store = {}
-    for _, name in ipairs({"Store","Settings","Ratings","Community","Peers","Reviewers"}) do
+    for _, name in ipairs({"Store","Settings","Tags","Ratings","Community","Peers","Reviewers"}) do
         assert(loadfile(root.."RateMeData/"..name..".lua"))("RateMeData",store)
     end
     local a = {protocol="1", myName="Me",myGuid="Player-me",myFaction="Alliance",
@@ -19,7 +19,7 @@ local function boot()
     function a:ValidateStoredTarget(t) return t.faction==self.myFaction end
     a:InitializeStorage()
     local communication={}
-    for _, name in ipairs({"Store","Payload","Diagnostics","Broadcasts","Network"}) do
+    for _, name in ipairs({"Store","Payload","Diagnostics","Broadcasts","ReviewTags","Network"}) do
         assert(loadfile(root.."RateMeCommunication/"..name..".lua"))("RateMeCommunication",communication)
     end
     communication:Bind(a)
@@ -49,10 +49,11 @@ assert(a.db.community[target.guid].votes.alice.score==5) -- saved before complet
 a:FinishQuery("one")
 assert(a:GetSummary(target.guid).count==2)
 assert(a:GetFreshCommunityScore(target.guid)==4)
-a.runtime.comments.comment={guid=target.guid,reviewer="alice",expires=999}
-a:HandleComment({"comment",target.guid,1,"Great\nplayer"},"Alice",true,"logged packet","canonical")
-assert(a.db.community[target.guid].votes.alice.comment=="Great\nplayer")
-assert(a.db.community[target.guid].votes.alice.commentSource==nil)
+local encoded=a:EncodeReviewTags({1,7})
+assert(a:SaveCommunityTags(target.guid,"alice",1,encoded))
+cache().votes.alice.tags=encoded
+assert(a.db.community[target.guid].votes.alice.tags==encoded)
+assert(a.db.community[target.guid].votes.alice.comment==nil)
 assert(a.db.community[target.guid].votes.alice.freshAt==nil)
 assert(a:IsCommunityReviewVerified(cache().votes.alice))
 assert(not a:IsCommunityReviewVerified({sender="Other",score=5}))
@@ -74,7 +75,7 @@ assert(a:GetSummary(target.guid).count==2)
 assert(not a:GetSummary(target.guid).fresh)
 assert(a:IsCommunityReviewVerified(cache().votes.alice)) -- cached does not mean unverified
 assert(a:GetFreshCommunityScore(target.guid)==nil)
-assert(cache().votes.alice.comment=="Great\nplayer")
+assert(cache().votes.alice.tags==encoded)
 assert(cache().votes.alice.commentSource==nil)
 start("two")
 reply("two","Alice",5,1,100,1)
@@ -83,11 +84,11 @@ assert(a:GetSummary(target.guid).count==2) -- missing Bob retained
 assert(a:GetSummary(target.guid).freshCount==1)
 assert(a:GetSummary(target.guid).cachedCount==1)
 assert(a:GetFreshCommunityScore(target.guid)==5) -- stale Bob excluded
-assert(cache().votes.alice.comment=="Great\nplayer")
+assert(cache().votes.alice.tags==encoded)
 start("three")
 reply("three","Alice",2,2,200,1)
 a:FinishQuery("three")
-assert(cache().votes.alice.comment==nil) -- old revision text invalidated
+assert(cache().votes.alice.tags==nil) -- old revision tags invalidated
 start("four")
 reply("four","Alice",0,3,300)
 a:FinishQuery("four")

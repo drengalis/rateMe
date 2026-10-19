@@ -1,5 +1,4 @@
--- Offline UI regression: multiline input must not use single-line artwork or
--- spill text out of its viewport. Comment bytes sit directly below the field.
+-- Offline tag editor and picker regression tests.
 local A = {MAX_COMMENT=160,STAR_EMPTY_TEXTURE='empty',STAR_FULL_TEXTURE='full'}
 local objects={}
 local function frame(kind,name,parent,template)
@@ -63,34 +62,43 @@ UISpecialFrames={}
 GameFontHighlight='highlight';ChatFontNormal='chat'
 function A:UTF8SafeCut(t,n)return t:sub(1,n)end
 local chunk=assert(loadfile('RateMe/UI.lua'));chunk('RateMe',A)
+local store=dofile('tests/load_data_addon.lua')
+store:Bind(A)
 A:CreateEditorWindow()
 local f=A.editor
-assert(f.comment.template==nil,'Do not use InputBoxTemplate for multiline reviews')
-assert(f.comment.multiline==true and f.comment.parent==f.commentScroll)
-assert(f.commentScroll.parent==f.commentBox and f.commentScroll.scrollChild==f.comment)
-assert(f.commentScroll.template=='UIPanelScrollFrameTemplate' and f.commentBar,'Editor must expose a standard vertical scrollbar')
-assert(f.commentBar.shown and f.commentBar.parent==f.commentScroll)
-assert(f.commentScroll.point[1]=='BOTTOMRIGHT' and f.commentScroll.point[2]==f.commentBox and f.commentScroll.point[4]==-33 and f.commentScroll.point[5]==8)
-assert(f.comment.width==382,'Reserve enough width to prevent writing behind the scrollbar')
-assert(f.commentBox.background[4]==1 and f.commentScroll.wheel)
-assert(f.bytes.point[2]==f.commentBox and f.bytes.point[3]=='BOTTOMRIGHT')
-assert(f.bytes.point[4]==-3 and f.bytes.point[5]==-4,'Counter must be directly under writing area')
-assert(f.commentBox.point[5]==-339 and f.commentBox.height==85)
-assert(f.save.point[5]==-463,'Save controls should remain below comment/counter')
-f.comment:SetText('First line\nSecond line')
-assert(f.comment:GetText()=='First line\nSecond line' and f.bytes.text=='22 / 160 bytes')
-f.comment.scripts.OnEnterPressed(f.comment)
-assert(f.comment:GetText()=='First line\nSecond line\n' and f.bytes.text=='23 / 160 bytes')
-f.comment.scripts.OnCursorChanged(f.comment,0,-120,0,14)
-assert(f.commentScroll.scroll>0,'Caret follows downward multiline text')
-f.comment:SetText(string.rep('x',162))
-assert(#f.comment:GetText()==160 and f.bytes.text=='160 / 160 bytes')
-f.comment.scripts.OnEscapePressed(f.comment)
-assert(f.comment.cleared and not f:IsShown())
-print('PASS: multiline editor is clipped and scrollable; counter is directly below; Enter, byte cap, caret, Escape')
--- Storage should keep intentional line breaks and still strip pipes/control chars.
-local S = dofile('tests/load_data_addon.lua')
-local storage=assert(loadfile('RateMe/Storage.lua'));storage('RateMe', A)
-assert(A:SanitizeComment('First\r\nSecond|T\9ok')=='First\nSecondT ok')
-print('PASS: newline-preserving comment sanitization and WoW formatting protection')
-
+assert(not f.comment and not f.commentBox and not f.bytes)
+A:SetTagSelection(f.tagControl,{1,7})
+assert(f.tagControl.count.text=='2 / 3 tags')
+A:OpenTagPicker(f.tagControl)
+local picker=A.tagPicker
+local count=0
+for _ in pairs(picker.buttons)do count=count+1 end
+assert(count==24)
+assert(not picker.buttons[33].enabled and not picker.buttons[44].enabled) -- fair-looter conflicts
+A:TogglePickerTag(4)
+assert(#f.tagControl.tags==3 and not f.tagControl.add.enabled)
+A:TogglePickerTag(3)
+assert(#f.tagControl.tags==3) -- maximum enforced even through direct callback
+f.tagControl.chips[1].scripts.OnClick()
+assert(#f.tagControl.tags==2 and f.tagControl.add.enabled)
+assert(A:ReviewTagText(33):find('|cffff5959-Ninja Looter',1,true))
+assert(A:ReviewTagText(1):find('|cff59ff73+Leader',1,true))
+local submitted
+A.SaveOwnRating=function(_,target,score,tags)submitted=A:EncodeReviewTags(tags);return true end
+A.Log=function()end
+A.DisplayName=function(_,n)return n or 'Target' end
+f.target={guid='Player-1-bb'};f.score=5
+f.save.scripts.OnClick()
+assert(submitted==A:EncodeReviewTags(f.tagControl.tags))
+-- The post-party editor uses the same picker, tags and dirty-state comparison.
+A:CreatePartyReviewWindow()
+local row=A:CreatePartyReviewRow(1)
+assert(not row.comment and row.tagControl)
+row.score=4
+A:SetTagSelection(row.tagControl,{33})
+A:UpdatePartyReviewRow(row)
+assert(row.dirty)
+row.initialScore=4;row.initialTags=A:EncodeReviewTags({33})
+A:UpdatePartyReviewRow(row)
+assert(not row.dirty)
+print('PASS: tag editor, split picker, three-tag limit, conflicts, removal, colours, save and party dirty state')

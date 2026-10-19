@@ -157,7 +157,7 @@ function Payload:Decode(message, sender)
             or #decodedLegacy > MAX_PACKET_BYTES then return nil end
         tag, canonical = decodedTag, decodedLegacy
     end
-    local argCount = ({H = 2, A = 2, P = 2, Q = 5, R = 7, ["C?"] = 3, C = 5, B = 11})[tag]
+    local argCount = ({H = 2, A = 2, P = 2, Q = 5, R = 7, B = 11, T = 6})[tag]
     return tag, canonical, argCount and fields(canonical, argCount) or nil
 end
 
@@ -189,19 +189,6 @@ function Payload:RatingFields(args)
         or (hasComment ~= 0 and hasComment ~= 1) then return end
     return id, guid, score, revision, timestamp, hasComment
 end
-function Payload:CommentRequestFields(args)
-    if args and #args == 3 and self:ValidId(args[2]) and self:ValidGuid(args[3]) then
-        return args[2], args[3]
-    end
-end
-function Payload:CommentFields(args, maxBytes)
-    if not args or #args ~= 5 then return end
-    local id, guid, revision, comment = args[2], args[3], tonumber(args[4]), args[5]
-    if type(comment) ~= "string" or #comment == 0 or #comment > maxBytes
-        or comment:find("[|%z\1-\9\11-\31\127]") then return end
-    return id, guid, revision, comment
-end
-
 A.Payload = Payload
 -- Facade preserved for existing addon callers and tests; implementations live
 -- in Payload, not Network. New wire formats register exclusively here.
@@ -219,7 +206,7 @@ function A:DecodePacket(message, sender) return self.payload:Decode(message, sen
 function Payload:RatingBroadcast(target, record)
     return self:Legacy("B", {"1", self.owner.myName, target.guid, target.name,
         target.faction, target.class or "", record.removed and 0 or record.score,
-        record.rev, record.date, record.comment and record.comment ~= "" and 1 or 0})
+        record.rev, record.date, 0})
 end
 
 function Payload:BroadcastFields(args)
@@ -233,5 +220,21 @@ function Payload:BroadcastFields(args)
         {"R", "broadcast", guid, args[8], args[9], args[10], args[11]})
     if not score then return end
     return {guid=guid, name=name, faction=faction, class=class}, reviewer,
-        {score=score, rev=rev, date=stamp, hasComment=hasComment == 1}
+        {score=score, rev=rev, date=stamp}
+end
+
+
+-- Additive tag packet. Numeric R/B messages retain their exact legacy shape.
+-- Three permanent IDs occupy at most THREE ASCII BYTES in this packet and DB.
+function Payload:ReviewTags(request, guid, revision, tags)
+    return self:Legacy("T", {"1",request or "-",guid,revision,self.owner:EncodeReviewTags(tags) or ""})
+end
+function Payload:ReviewTagFields(args)
+    if not args or #args~=6 or args[2]~="1" then return end
+    local request,guid,rev,tags=args[3],args[4],tonumber(args[5]),args[6]
+    if (request~="-" and not self:ValidId(request)) or not self:ValidGuid(guid)
+        or not rev or rev~=math.floor(rev) or rev<1 or rev>100000000 then return end
+    local encoded=self.owner:EncodeReviewTags(tags)
+    if not encoded then return end
+    return request,guid,rev,encoded
 end

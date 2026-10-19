@@ -50,7 +50,8 @@ local function makeFrame(name, width, height)
         if A.MarkWindowShown then A:MarkWindowShown(self) end
         if A.ArrangeWindows then A:ArrangeWindows() end
     end)
-    f:SetScript("OnHide", function()
+    f:SetScript("OnHide", function(self)
+        if A.tagPicker and A.tagPicker.owner and A.tagPicker.owner.window == self then A.tagPicker:Hide() end
         if A.ArrangeWindows then A:ArrangeWindows() end
     end)
     f:Hide()
@@ -67,7 +68,7 @@ function A:ArrangeWindows()
     if not UIParent or not UIParent.GetWidth or not UIParent.GetHeight then return end
     local frames = {}
     local totalWidth, maxHeight = 0, 0
-    for _, windowName in ipairs({"main", "editor", "reviews", "partyReview", "reportHelp"}) do
+    for _, windowName in ipairs({"main", "editor", "reviews", "partyReview", "tagPicker"}) do
         local frame = self[windowName]
         if frame and frame:IsShown() then
             frames[#frames + 1] = frame
@@ -106,7 +107,7 @@ end
 -- Rate Me! window instead of merely clearing focus.
 function A:CloseTopWindow()
     local newest, newestOrder
-    for _, windowName in ipairs({"main", "editor", "reviews", "partyReview", "reportHelp"}) do
+    for _, windowName in ipairs({"main", "editor", "reviews", "partyReview", "tagPicker"}) do
         local frame = self[windowName]
         if frame and frame:IsShown() then
             local order = frame.rateMeShowOrder or 0
@@ -332,7 +333,7 @@ function A:CreateSettingsPanel()
     -- hard-coded 665/640 widths that left a large unused strip on the right.
     -- Match future size changes (including UI-scale changes) automatically.
     local p = CreateFrame("Frame", nil, scroll)
-    p:SetSize(699, 1525) -- eight responsive sections, including communication controls
+    p:SetSize(699, 1397) -- seven responsive sections, including communication controls
     scroll:SetScrollChild(p)
     scroll.content = p
     scroll:SetScript("OnSizeChanged", function(_, width)
@@ -485,17 +486,7 @@ function A:CreateSettingsPanel()
         "Dismiss with Escape. Reopen the last party with /rateme party.", 55, -84, 545)
     partyHint:SetTextColor(unpack(MUTED))
 
-    local comments = section(920, 109, "Comment Safety")
-    p.hideCommentsByDefault, p.hideCommentsByDefaultRow, p.hideCommentsByDefaultLabel = checkbox(comments,
-        "hideCommentsByDefault", "Keep reviews hidden until I choose to show them", 19, 51, function()
-            A.revealedReviews = {}
-            if A.reviews and A.reviews:IsShown() then A:DrawReviews() end
-        end)
-    local commentHint = label(comments, "GameFontHighlightSmall",
-        "Show/Hide, Block and Report controls are available per review.", 55, -85, 545)
-    commentHint:SetTextColor(unpack(MUTED))
-
-    local minimap = section(1048, 109, "Minimap Button")
+    local minimap = section(920, 109, "Minimap Button")
     p.minimapVisible, p.minimapVisibleRow, p.minimapVisibleLabel = checkbox(minimap,
         "minimapVisible", "Show the movable Rate Me! button on my minimap", 19, 51,
         function() A:SetMinimapVisible(A.db.settings.minimapVisible) end)
@@ -503,7 +494,7 @@ function A:CreateSettingsPanel()
         "Left-click: open     Left-drag: move     /rateme: always available", 55, -84, 545)
     miniHint:SetTextColor(unpack(MUTED))
 
-    local communication = section(1176, 220, "Communication")
+    local communication = section(1048, 220, "Communication")
     p.sendRatingBroadcasts = checkbox(communication, "sendRatingBroadcasts",
         "Announce my new, edited and removed ratings to other users", 19, 42,
         function() A:OnCommunicationSettingsChanged() end)
@@ -533,14 +524,14 @@ function A:CreateSettingsPanel()
     local networkHint = label(communication, "GameFontDisableSmall",
         "Peers may forward lookups. Broadcast reach depends on available game channels.", 55, -190, 580)
 
-    local diagnostics = section(1416, 90, "Diagnostics")
+    local diagnostics = section(1288, 90, "Diagnostics")
     p.debug, p.debugRow, p.debugLabel = checkbox(diagnostics,
         "debug", "Show rating and peer-to-peer activity in chat (debug)", 19, 51)
 
     -- Preserve original controls/aliases for any current callers or testing.
     for _, name in ipairs({"enabled", "alertPersonal", "alertCommunity", "threshold", "thresholdValue",
         "personalThreshold", "personalThresholdValue", "highlights", "highlightGlow", "highlightBadge",
-        "highlightPersonal", "highlightCommunity", "minimapVisible", "partyReviewPrompt", "hideCommentsByDefault",
+        "highlightPersonal", "highlightCommunity", "minimapVisible", "partyReviewPrompt",
         "allCharacters", "debug"}) do
         scroll[name] = p[name]
     end
@@ -569,7 +560,6 @@ function A:DrawSettings()
     p.highlightCommunity:SetChecked(settings.ratingHighlightsCommunity)
     p.minimapVisible:SetChecked(settings.minimapVisible)
     p.partyReviewPrompt:SetChecked(settings.partyReviewPrompt)
-    p.hideCommentsByDefault:SetChecked(settings.hideCommentsByDefault)
 
     local function dependent(control, row, caption, isEnabled)
         control:SetEnabled(isEnabled)
@@ -741,6 +731,111 @@ function A:DrawMain()
     end
 end
 
+-- Shared tag selection for the individual editor and post-party editor.
+function A:CreateTagSelection(parent, window, x, y, width, changed)
+    local c=CreateFrame("Frame",nil,parent)
+    c:SetSize(width,110)
+    c:SetPoint("TOPLEFT",parent,"TOPLEFT",x,y)
+    c.tags,c.window,c.changed={},window,changed
+    c.add=button(c,"Add Tag",100,24,0,0,function() A:OpenTagPicker(c) end)
+    c.count=label(c,"GameFontDisableSmall","0 / 3 tags",width-110,-6,110,"RIGHT")
+    c.chips={}
+    for n=1,3 do
+        local slot=n
+        local chip=button(c,"",width,23,0,-(29+(n-1)*25),function()
+            table.remove(c.tags,slot)
+            A:RefreshTagSelection(c)
+            if c.changed then c.changed() end
+            A:DrawTagPicker()
+        end)
+        chip.caption=label(chip,"GameFontHighlightSmall","",8,-5,width-16)
+        c.chips[n]=chip
+        chip:Hide()
+    end
+    return c
+end
+
+function A:SetTagSelection(control, value)
+    control.tags=self:ReviewTagIds(value) or {}
+    self:RefreshTagSelection(control)
+    if self.tagPicker and self.tagPicker.owner==control then self:DrawTagPicker() end
+end
+
+function A:RefreshTagSelection(control)
+    control.count:SetText(tostring(#control.tags).." / 3 tags")
+    control.add:SetEnabled(#control.tags<3)
+    for n,chip in ipairs(control.chips) do
+        local id=control.tags[n]
+        if id then chip.caption:SetText(self:ReviewTagText(id).."   |cffaaaaaaX|r");chip:Show()
+        else chip:Hide() end
+    end
+end
+
+function A:OpenTagPicker(control)
+    if not self.tagPicker then
+        local f=makeFrame("RateMeTagPicker",690,460)
+        label(f,"GameFontNormalLarge","Add Tag",25,-25)
+        label(f,"GameFontHighlightSmall","Choose up to three tags total. Click a selected tag to remove it.",25,-54,630)
+        label(f,"GameFontNormal","Positive",25,-85,300):SetTextColor(0.35,1,0.45)
+        label(f,"GameFontNormal","Negative",350,-85,310):SetTextColor(1,0.35,0.35)
+        f.buttons={}
+        local counts={positive=0,negative=0}
+        for id=1,63 do
+            local tag=self.TAG_REGISTRY[id]
+            if tag and not tag.retired then
+                local group=tag.positive and "positive" or "negative"
+                local x=tag.positive and 25 or 350
+                local y=-(111+counts[group]*25)
+                counts[group]=counts[group]+1
+                local tagId=id
+                local b=button(f,"",310,23,x,y,function() A:TogglePickerTag(tagId) end)
+                b.caption=label(b,"GameFontHighlightSmall","",8,-5,296)
+                f.buttons[id]=b
+            end
+        end
+        f.count=label(f,"GameFontDisableSmall","",25,-421,420)
+        button(f,"Done",110,25,550,-419,function() f:Hide() end)
+        self.tagPicker=f
+    end
+    self.tagPicker.owner=control
+    self:DrawTagPicker()
+    self.tagPicker:Show()
+    self:MarkWindowShown(self.tagPicker)
+end
+
+function A:DrawTagPicker()
+    local f=self.tagPicker
+    if not f or not f.owner then return end
+    local tags=f.owner.tags
+    for id,b in pairs(f.buttons) do
+        local selected=false
+        for _,chosen in ipairs(tags) do if chosen==id then selected=true end end
+        local candidate={}
+        for _,chosen in ipairs(tags) do candidate[#candidate+1]=chosen end
+        candidate[#candidate+1]=id
+        b:SetEnabled(selected or self:EncodeReviewTags(candidate)~=nil)
+        b.caption:SetText(self:ReviewTagText(id)..(selected and "  |cffffffff[selected]|r" or ""))
+    end
+    f.count:SetText(tostring(#tags).." / 3 tags selected")
+end
+
+function A:TogglePickerTag(id)
+    local control=self.tagPicker and self.tagPicker.owner
+    if not control then return end
+    local candidate={}
+    local found=false
+    for _,chosen in ipairs(control.tags) do
+        if chosen==id then found=true else candidate[#candidate+1]=chosen end
+    end
+    if not found then candidate[#candidate+1]=id end
+    local valid=self:ReviewTagIds(candidate)
+    if not valid then return end
+    control.tags=valid
+    self:RefreshTagSelection(control)
+    if control.changed then control.changed() end
+    self:DrawTagPicker()
+end
+
 function A:CreateEditorWindow()
     local f = makeFrame("RateMeEditorWindow", 510, 520)
     label(f, "GameFontNormalLarge", "Rate Me!", 27, -26)
@@ -766,95 +861,10 @@ function A:CreateEditorWindow()
     -- Personal rating uses interactive star textures, plus a numeric score beside them.
     f.selectedNumeric = label(f, "GameFontHighlight", "", 405, -243, 74)
     f.scoreText = label(f, "GameFontHighlightSmall", "", 28, -285, 430)
-    label(f, "GameFontNormal", "Your comment (optional)", 28, -312)
-    -- InputBoxTemplate is a SINGLE-LINE visual: using it with SetMultiLine
-    -- puts extra lines outside the thin input artwork. Instead, frame a real
-    -- multi-line EditBox inside a clipped ScrollFrame. Its height grows with
-    -- its text, while the viewport stays the same height.
-    f.commentBox = CreateFrame("Frame", nil, f, "BackdropTemplate")
-    f.commentBox:SetSize(432, 85)
-    f.commentBox:SetPoint("TOPLEFT", f, "TOPLEFT", 28, -339)
-    f.commentBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = false, edgeSize = 12,
-        insets = {left = 3, right = 3, top = 3, bottom = 3},
-    })
-    f.commentBox:SetBackdropColor(0.025, 0.03, 0.045, 1)
-    f.commentBox:SetBackdropBorderColor(0.40, 0.44, 0.52, 1)
-
-    -- The named UIPanelScrollFrameTemplate provides a visible scrollbar with
-    -- mouse/keyboard/drag controls. Reserve a strip within the comment border.
-    f.commentScroll = CreateFrame("ScrollFrame", "RateMeEditorCommentScrollFrame",
-        f.commentBox, "UIPanelScrollFrameTemplate")
-    f.commentScroll:SetPoint("TOPLEFT", f.commentBox, "TOPLEFT", 9, -8)
-    f.commentScroll:SetPoint("BOTTOMRIGHT", f.commentBox, "BOTTOMRIGHT", -33, 8)
-    f.commentBar = _G["RateMeEditorCommentScrollFrameScrollBar"]
-    if f.commentBar then
-        f.commentBar:ClearAllPoints()
-        f.commentBar:SetPoint("TOPLEFT", f.commentScroll, "TOPRIGHT", 5, -15)
-        f.commentBar:SetPoint("BOTTOMLEFT", f.commentScroll, "BOTTOMRIGHT", 5, 15)
-        f.commentBar:Show()
-    end
-    f.commentScroll:EnableMouseWheel(true)
-    f.commentScroll:SetScript("OnMouseWheel", function(scroll, delta)
-        scroll:SetVerticalScroll(math.max(0, math.min(scroll:GetVerticalScrollRange(),
-            scroll:GetVerticalScroll() - delta * 20)))
-    end)
-    f.commentScroll:SetScript("OnMouseDown", function() f.comment:SetFocus() end)
-
-    f.comment = CreateFrame("EditBox", nil, f.commentScroll)
-    f.comment:SetFontObject(ChatFontNormal or GameFontHighlight)
-    f.comment:SetTextColor(0.96, 0.95, 0.91)
-    f.comment:SetMultiLine(true)
-    f.comment:SetWidth(382)
-    f.comment:SetHeight(18) -- Multiline EditBoxes expand automatically as text wraps.
-    f.comment:SetAutoFocus(false)
-    f.comment:SetMaxLetters(self.MAX_COMMENT)
-    if f.comment.SetMaxBytes then f.comment:SetMaxBytes(self.MAX_COMMENT) end
-    if f.comment.SetSpacing then f.comment:SetSpacing(2) end
-    f.commentScroll:SetScrollChild(f.comment)
-    f.commentBox:SetScript("OnMouseDown", function() f.comment:SetFocus() end)
-    -- Enter inserts a newline rather than saving/closing the rating window.
-    f.comment:SetScript("OnEnterPressed", function(self)
-        self:Insert("\n")
-        -- Some clients do not fire OnTextChanged for programmatic Insert().
-        if f.commentScroll.UpdateScrollChildRect then f.commentScroll:UpdateScrollChildRect() end
-        if f.bytes then f.bytes:SetText(tostring(#self:GetText()) .. " / " .. A.MAX_COMMENT .. " bytes") end
-    end)
-    f.comment:SetScript("OnEscapePressed", function(self)
-        self:ClearFocus()
-        A:CloseTopWindow()
-    end)
-    f.comment:SetScript("OnCursorChanged", function(_, _, y, _, lineHeight)
-        if type(y) ~= "number" then return end
-        local scroll = f.commentScroll
-        if scroll.UpdateScrollChildRect then scroll:UpdateScrollChildRect() end
-        local cursorTop = math.max(0, -y)
-        local cursorBottom = cursorTop + (type(lineHeight) == "number" and lineHeight or 14)
-        local offset, height = scroll:GetVerticalScroll(), scroll:GetHeight()
-        if cursorTop < offset then
-            scroll:SetVerticalScroll(cursorTop)
-        elseif cursorBottom > offset + height then
-            scroll:SetVerticalScroll(cursorBottom - height)
-        end
-    end)
-    f.comment:SetScript("OnTextChanged", function(self)
-        local text = self:GetText()
-        -- SetText does not necessarily respect SetMaxBytes; enforce the actual
-        -- UTF-8 byte limit for pasted or prefilled comments as well.
-        if #text > A.MAX_COMMENT then
-            self:SetText(A:UTF8SafeCut(text, A.MAX_COMMENT))
-            return
-        end
-        if f.commentScroll.UpdateScrollChildRect then f.commentScroll:UpdateScrollChildRect() end
-        if f.bytes then f.bytes:SetText(tostring(#text) .. " / " .. A.MAX_COMMENT .. " bytes") end
-    end)
-    f.bytes = label(f, "GameFontDisableSmall", "0 / 160 bytes", 28, -432, 432, "RIGHT")
-    f.bytes:ClearAllPoints()
-    f.bytes:SetPoint("TOPRIGHT", f.commentBox, "BOTTOMRIGHT", -3, -4)
+    label(f, "GameFontNormal", "Your tags (optional)", 28, -312)
+    f.tagControl = self:CreateTagSelection(f, f, 28, -336, 432)
     f.save = button(f, "Save Rating", 125, 26, 28, -463, function()
-        local ok, err = A:SaveOwnRating(f.target, f.score, f.comment:GetText())
+        local ok, err = A:SaveOwnRating(f.target, f.score, f.tagControl.tags)
         if ok then
             f:Hide()
             A:Log("Saved your rating for " .. A:DisplayName(f.target.name))
@@ -904,7 +914,7 @@ function A:OpenEditor(target)
     f.target = {guid = target.guid, name = target.name, faction = target.faction, class = target.class}
     local prior = self:GetOwnRating(f.target.guid)
     f.score = (prior and not prior.removed and prior.score) or 0
-    f.comment:SetText((prior and not prior.removed and prior.comment) or "")
+    self:SetTagSelection(f.tagControl, (prior and not prior.removed and prior.tags) or "")
     f.targetText:SetText(self:DisplayName(f.target.name) .. (f.target.class and ("  •  " .. f.target.class) or ""))
     f.remove:SetEnabled(prior ~= nil and not prior.removed)
     f.save:SetText(prior and not prior.removed and "Update Rating" or "Save Rating")
@@ -931,10 +941,7 @@ function A:CreateReviewsWindow()
     f.refresh = button(f, "Refresh", 130, 26, 28, -508, function()
         if f.target then A:Query(f.target, true) end
     end)
-    f.comments = button(f, "Fetch Comments", 143, 26, 168, -508, function()
-        if f.target then A:RequestComments(f.target.guid); A:DrawReviews() end
-    end)
-    button(f, "Rate Player", 145, 26, 324, -508, function()
+    button(f, "Rate Player", 145, 26, 168, -508, function()
         if f.target then A:OpenEditor(f.target) end
     end)
     self.reviews = f
@@ -976,22 +983,13 @@ function A:CreateReviewRow(index)
         GameTooltip:Show()
     end)
     row.verification:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    row.commentText = label(row, "GameFontHighlightSmall", "", 8, -49, 530)
-    row.commentText:SetJustifyV("TOP")
-    row.commentText:SetHeight(31)
-    row.visibility = button(row, "Show", 83, 20, 266, -85, function()
-        if not row.reviewer or not row.vote or not row.vote.comment or A.db.ignored[row.reviewer] then return end
-        A:CycleReviewVisibility(f.target.guid, row.reviewer, row.vote)
-    end)
-    row.block = button(row, "Block", 89, 20, 356, -85, function()
+    row.tagsText = label(row, "GameFontHighlightSmall", "", 8, -49, 530)
+    row.tagsText:SetJustifyV("TOP")
+    row.tagsText:SetHeight(31)
+    row.block = button(row, "Hide tags", 110, 20, 432, -85, function()
         if not row.reviewer then return end
         A:ToggleReviewerBlock(row.reviewer)
         A:DrawReviews()
-    end)
-    row.report = button(row, "Report", 90, 20, 452, -85, function()
-        if row.reviewer and row.vote and f.target then
-            A:OpenReportHelp(row.reviewer, f.target, row.vote)
-        end
     end)
     f.rows[index] = row
     return row
@@ -1027,7 +1025,7 @@ function A:DrawReviews()
         row.reviewer, row.vote = entry.reviewer, vote
         local ignored = self.db.ignored[entry.reviewer]
         row.nameText:SetText(self:DisplayName(vote.sender or entry.reviewer))
-        row.block:SetText(ignored and "Unblock" or "Block")
+        row.block:SetText(ignored and "Show tags" or "Hide tags")
         row.scoreText:SetText(self:WindowScoreText(vote.score, 15))
         row.dateText:SetText("Rated " .. self:DateText(vote.date))
         if self:IsCommunityReviewVerified(vote) then
@@ -1041,74 +1039,11 @@ function A:DrawReviews()
             row.verificationText:SetTextColor(1, 0.75, 0.3)
         end
 
-        local commentText, action = self:ReviewCommentText(guid, entry.reviewer, vote)
-        row.commentText:SetText(commentText)
-        row.visibility:SetText(action or "Show")
-        row.visibility:SetEnabled(not ignored and action ~= nil)
-        row.report:SetEnabled(self:GetCommentReportEvidence(guid, entry.reviewer, vote) ~= nil)
+        row.tagsText:SetText(ignored and "Tags hidden for this reviewer" or self:ReviewTagsText(vote.tags))
         row:Show()
     end
     for index = #list + 1, #f.rows do f.rows[index]:Hide() end
     f.content:SetHeight(math.max(1, #list * 117))
-end
-
--- A report refers to the *logged comment sender*, NEVER the reviewed target.
--- This is a manual Blizzard Support workflow; no ticket is submitted by addon.
-function A:CreateReportHelpWindow()
-    local f = makeFrame("RateMeReportHelpWindow", 585, 480)
-    label(f, "GameFontNormalLarge", "Rate Me! — Report Review Author", 22, -25, 535)
-    label(f, "GameFontHighlightSmall",
-        "This does not submit a report. Report the comment AUTHOR below, not the player being reviewed. " ..
-        "Include the exact logged message and a screenshot with your Blizzard Support ticket.",
-        26, -65, 530):SetHeight(50)
-    label(f, "GameFontNormal", "PLAYER TO REPORT (verified logged sender / Character-Realm):", 26, -127, 535)
-    f.author = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    f.author:SetSize(505, 25)
-    f.author:SetPoint("TOPLEFT", 34, -151)
-    f.author:SetAutoFocus(false)
-    f.author:SetMaxLetters(80)
-    f.author:SetScript("OnEscapePressed", function(self) self:ClearFocus(); A:CloseTopWindow() end)
-    f.author:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
-    f.context = label(f, "GameFontHighlightSmall", "", 26, -191, 535)
-    f.context:SetHeight(45)
-    label(f, "GameFontNormal", "Exact received logged message (select and copy):", 26, -247, 530)
-    f.payload = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    f.payload:SetSize(505, 67)
-    f.payload:SetPoint("TOPLEFT", 34, -272)
-    f.payload:SetMultiLine(true)
-    f.payload:SetAutoFocus(false)
-    f.payload:SetMaxLetters(255)
-    f.payload:SetScript("OnEscapePressed", function(self) self:ClearFocus(); A:CloseTopWindow() end)
-    f.payload:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
-    label(f, "GameFontNormal", "Blizzard Support — Harassment in Addon Text:", 26, -354, 530)
-    f.url = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    f.url:SetSize(505, 24)
-    f.url:SetPoint("TOPLEFT", 34, -378)
-    f.url:SetAutoFocus(false)
-    f.url:SetMaxLetters(255)
-    f.url:SetText("https://battle.net/support/help/product/wow/197/1501/solution")
-    f.url:SetScript("OnEscapePressed", function(self) self:ClearFocus(); A:CloseTopWindow() end)
-    f.url:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
-    label(f, "GameFontDisableSmall",
-        "Copy the author exactly, including realm. Blizzard determines whether a violation occurred.",
-        26, -417, 530):SetHeight(27)
-    button(f, "Close", 100, 25, 452, -444, function() f:Hide() end)
-    self.reportHelp = f
-end
-
-function A:OpenReportHelp(reviewer, target, vote)
-    if not self.reportHelp or not target then return end
-    local evidence = self:GetCommentReportEvidence(target.guid, reviewer, vote)
-    if not evidence then return end
-    local f = self.reportHelp
-    -- Preserve the canonical identity, with its dash, for Blizzard Support.
-    -- DisplayName() is intentionally NOT used for report attribution.
-    f.author:SetText(evidence.author)
-    f.context:SetText(string.format("Reviewed player (context ONLY): %s\nLogged message received: %s (client local time)",
-        tostring(target.name or "Unknown"), self:DateText(evidence.receivedAt, true)))
-    f.payload:SetText(evidence.payload)
-    f:Show()
-    self:MarkWindowShown(f)
 end
 
 function A:OpenReviews(target)
@@ -1116,12 +1051,9 @@ function A:OpenReviews(target)
     local f = self.reviews
     f.target = {guid = target.guid, name = target.name, faction = target.faction, class = target.class}
     self:RememberTarget(f.target)
-    -- A previous reveal is never carried over to a newly opened reviews window.
-    self.revealedReviews = {}
     self:Query(f.target)
     f:Show()
     self:MarkWindowShown(f)
-    self:RequestComments(f.target.guid)
     self:DrawReviews()
 end
 
@@ -1175,7 +1107,7 @@ function A:CreatePartyReviewWindow()
     local f = makeFrame("RateMePartyReviewWindow", 748, 568)
     label(f, "GameFontNormalLarge", "Rate Me! - Rate Your Party", 24, -22)
     label(f, "GameFontHighlightSmall",
-        "Choose stars and optionally add comments. Leave a player unrated to skip them.",
+        "Choose stars and optionally add up to three tags. Leave a player unrated to skip them.",
         25, -54, 680)
     f.status = label(f, "GameFontDisableSmall", "", 25, -79, 690)
     f.scroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
@@ -1191,24 +1123,24 @@ function A:CreatePartyReviewWindow()
         for _, row in ipairs(f.rows) do
             if row:IsShown() and row.target and row.dirty then
                 if row.score > 0 then
-                    local ok, err = A:SaveOwnRating(row.target, row.score, row.comment:GetText())
+                    local ok, err = A:SaveOwnRating(row.target, row.score, row.tagControl.tags)
                     if ok then
                         saved = saved + 1
                         -- A partial save must not resubmit already-saved reviews.
                         row.initialScore = row.score
-                        row.initialComment = row.comment:GetText()
+                        row.initialTags = A:EncodeReviewTags(row.tagControl.tags)
                         row.dirty = false
                     else
                         failed = failed + 1
                         A:Debug("Could not save a party rating: " .. tostring(err))
                     end
-                elseif row.comment:GetText() ~= "" then
+                elseif #row.tagControl.tags > 0 then
                     incomplete = incomplete + 1
                 end
             end
         end
         if failed > 0 or incomplete > 0 then
-            f.status:SetText(string.format("%d saved; %d failed; %d comment(s) need a star rating.",
+            f.status:SetText(string.format("%d saved; %d failed; %d tag selection(s) need a star rating.",
                 saved, failed, incomplete))
         else
             f:Hide()
@@ -1222,8 +1154,8 @@ end
 function A:CreatePartyReviewRow(index)
     local f = self.partyReview
     local row = CreateFrame("Frame", nil, f.content)
-    row:SetSize(660, 92)
-    row:SetPoint("TOPLEFT", f.content, "TOPLEFT", 0, -(index - 1) * 95)
+    row:SetSize(660, 164)
+    row:SetPoint("TOPLEFT", f.content, "TOPLEFT", 0, -(index - 1) * 168)
     local background = row:CreateTexture(nil, "BACKGROUND")
     background:SetAllPoints(row)
     background:SetColorTexture(0.18, 0.20, 0.25, index % 2 == 0 and 1 or 0.78)
@@ -1232,7 +1164,7 @@ function A:CreatePartyReviewRow(index)
     row.stars = {}
     row.score = 0
     row.initialScore = 0
-    row.initialComment = ""
+    row.initialTags = ""
     row.dirty = false
     for n = 1, 5 do
         local star = CreateFrame("Button", nil, row)
@@ -1250,19 +1182,8 @@ function A:CreatePartyReviewRow(index)
         row.stars[n] = star
     end
     row.numeric = label(row, "GameFontHighlight", "", 493, -15, 125, "RIGHT")
-    label(row, "GameFontDisableSmall", "Comment:", 12, -62, 68)
-    row.comment = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
-    row.comment:SetSize(533, 26)
-    row.comment:SetPoint("TOPLEFT", row, "TOPLEFT", 90, -51)
-    row.comment:SetAutoFocus(false)
-    row.comment:SetMaxLetters(self.MAX_COMMENT)
-    row.comment:SetScript("OnTextChanged", function()
-        if not row.loading then A:UpdatePartyReviewRow(row) end
-    end)
-    row.comment:SetScript("OnEscapePressed", function(self)
-        self:ClearFocus()
-        A:CloseTopWindow()
-    end)
+    row.tagControl = self:CreateTagSelection(row, f, 12, -52, 630,
+        function() if not row.loading then A:UpdatePartyReviewRow(row) end end)
     f.rows[index] = row
     return row
 end
@@ -1272,7 +1193,7 @@ function A:UpdatePartyReviewRow(row)
         star.icon:SetTexture(n <= row.score and self.STAR_FULL_TEXTURE or self.STAR_EMPTY_TEXTURE)
     end
     row.numeric:SetText(row.score > 0 and string.format("%.1f", row.score) or "Not rated")
-    row.dirty = row.score ~= row.initialScore or row.comment:GetText() ~= row.initialComment
+    row.dirty = row.score ~= row.initialScore or self:EncodeReviewTags(row.tagControl.tags) ~= row.initialTags
 end
 
 function A:OpenPartyReview(members)
@@ -1288,10 +1209,10 @@ function A:OpenPartyReview(members)
             local prior = self:GetOwnRating(target.guid)
             local hasPrior = prior and not prior.removed
             row.initialScore = hasPrior and prior.score or 0
-            row.initialComment = hasPrior and prior.comment or ""
+            row.initialTags = hasPrior and prior.tags or ""
             row.score = row.initialScore
             row.loading = true
-            row.comment:SetText(row.initialComment)
+            self:SetTagSelection(row.tagControl, row.initialTags)
             row.loading = false
             row.nameText:SetText(self:DisplayName(target.name))
             local community = self:GetSummary(target.guid)
@@ -1307,7 +1228,7 @@ function A:OpenPartyReview(members)
     end
     for i = count + 1, #f.rows do f.rows[i]:Hide() end
     if count == 0 then return end
-    f.content:SetHeight(math.max(1, count * 95))
+    f.content:SetHeight(math.max(1, count * 168))
     f.status:SetText(string.format("%d eligible player%s from your last party", count, count == 1 and "" or "s"))
     f:Show()
     self:MarkWindowShown(f)
@@ -1320,7 +1241,6 @@ function A:InitializeUI()
     self:CreateEditorWindow()
     self:CreateReviewsWindow()
     self:CreatePartyReviewWindow()
-    self:CreateReportHelpWindow()
     local layoutWatcher = CreateFrame("Frame")
     layoutWatcher:RegisterEvent("UI_SCALE_CHANGED")
     layoutWatcher:RegisterEvent("DISPLAY_SIZE_CHANGED")

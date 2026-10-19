@@ -56,9 +56,13 @@ function A:BroadcastOwnRating(record)
         self:Debug("Could not announce this rating: the message exceeds the game's size limit.")
         return 0
     end
+    local tags = self.payload:ReviewTags("-", record.guid, record.rev, record.tags)
     local sent = 0
     local function queue(channel, target)
-        if self:QueueSend(packet, channel, target) then sent = sent + 1 end
+        if self:QueueSend(packet, channel, target) then
+            self:QueueSend(tags, channel, target)
+            sent = sent + 1
+        end
     end
     local id = self:EnsureBroadcastChannel()
     if id then queue("CHANNEL", id) end
@@ -92,6 +96,7 @@ function A:HandleRatingBroadcast(args, sender)
     -- An unverified copy can become verified on direct receipt of the same revision.
     vote.sender, vote.freshAt = self:CleanName(sender), self:Now()
     if not self:SaveCommunityRating(target, key, vote) then return end
+    self:ApplyPendingReviewTags(target.guid, key, vote)
     self:RememberPeer(sender)
     self:RememberTarget(target)
     local cache = self.runtime.cache[target.guid] or {votes={}}

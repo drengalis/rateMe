@@ -5,7 +5,7 @@ local A = Store.API
 -- Persist data only, never monotonic timers, pending requests or report evidence.
 local function copyVote(v)
     return {sender=v.sender, score=v.score, rev=v.rev, date=v.date,
-        hasComment=v.hasComment, comment=v.comment, verifiedAt=v.verifiedAt}
+        tags=v.tags, verifiedAt=v.verifiedAt}
 end
 
 function A:RestoreCommunityLookups()
@@ -37,20 +37,23 @@ function A:SaveCommunityRating(target, reviewer, vote)
     if prior and prior.rev > vote.rev then return false end
     if prior and prior.rev == vote.rev then
         if prior.score ~= vote.score or prior.date ~= vote.date
-            or prior.hasComment ~= vote.hasComment then return false end
-        vote.comment = prior.comment
+            then return false end
+        vote.tags = vote.tags or prior.tags
     end
     vote.verifiedAt = self:Stamp()
     item.votes[reviewer] = copyVote(vote)
     return true
 end
 
-function A:SaveCommunityComment(guid, reviewer, vote)
+function A:SaveCommunityTags(guid, reviewer, revision, tags)
     local item = self.db.community[guid]
-    local prior = item and item.votes[reviewer]
-    if prior and prior.score > 0 and prior.rev == vote.rev and prior.hasComment then
-        prior.comment = vote.comment
-    end
+    local vote = item and item.votes[reviewer]
+    local encoded = self:EncodeReviewTags(tags)
+    if not vote or vote.score == 0 or vote.rev ~= revision or not encoded then return false end
+    -- Equal revisions are immutable once their complete tag set is known.
+    if vote.tags ~= nil and vote.tags ~= encoded then return false end
+    vote.tags = encoded
+    return true
 end
 
 -- Authorship verification survives reloads; freshness is a separate session flag.
@@ -96,11 +99,11 @@ end
 function A:GetSummary(guid)
     local cache = self.runtime.cache[guid]
     if cache then
-        local total, count, withComments, freshCount = 0, 0, 0, 0
+        local total, count, withTags, freshCount = 0, 0, 0, 0
         for _, v in pairs(cache.votes) do
             if v.score >= 1 and v.score <= 5 then
                 total, count = total + v.score, count + 1
-                if v.hasComment then withComments = withComments + 1 end
+                if v.tags and v.tags ~= "" then withTags = withTags + 1 end
                 if v.freshAt and self:Now() - v.freshAt < self.CACHE_SECONDS then
                     freshCount = freshCount + 1
                 end
@@ -108,13 +111,13 @@ function A:GetSummary(guid)
         end
         local age = self:Stamp() - (cache.lastComplete or 0)
         return { average = count > 0 and total / count or nil, count = count,
-            comments = withComments, fresh = count > 0 and freshCount == count,
+            tagged = withTags, fresh = count > 0 and freshCount == count,
             freshCount = freshCount, cachedCount = count - freshCount,
             age = math.max(0, age), at = cache.lastComplete or 0 }
     end
     local prior = self.data.recent[guid]
     if prior and prior.checked and prior.checked > 0 then
-        return { average = prior.average, count = prior.count or 0, comments = prior.comments or 0,
+        return { average = prior.average, count = prior.count or 0, tagged = prior.tagged or 0,
             fresh = false, at = prior.checked, historical = true }
     end
     return nil
@@ -144,6 +147,6 @@ function A:SaveLookupSummary(guid, summary)
     if not recent then return end
     recent.average = summary and summary.average or nil
     recent.count = summary and summary.count or 0
-    recent.comments = summary and summary.comments or 0
+    recent.tagged = summary and summary.tagged or 0
     recent.checked = self:Stamp()
 end

@@ -61,15 +61,15 @@ local chunk=assert(loadfile('RateMe/UI.lua'))
 chunk('RateMe', A)
 A:CreateSettingsPanel()
 local p=A.main.settingsPanel.content
-assert(p.height==1525 and p.width==699)
+assert(p.height==1397 and p.width==699)
 assert(A.main.settingsPanel.scrollChild==p)
 assert(p.enabled and p.alertPersonal and p.alertCommunity and p.threshold and p.personalThreshold)
-assert(p.highlights and p.highlightGlow and p.highlightBadge and p.highlightPersonal and p.highlightCommunity and p.minimapVisible and p.partyReviewPrompt and p.hideCommentsByDefault and p.allCharacters and p.debug)
+assert(p.highlights and p.highlightGlow and p.highlightBadge and p.highlightPersonal and p.highlightCommunity and p.minimapVisible and p.partyReviewPrompt and p.allCharacters and p.debug)
 local cards={}
 for _,o in ipairs(objects) do
  if o.parent==p and o.bgColor then cards[#cards+1]=o end
 end
-assert(#cards==8,'Expected eight distinct sections, got '..#cards)
+assert(#cards==7,'Expected seven distinct sections, got '..#cards)
 local previousBottom=0
 for _,card in ipairs(cards) do
  assert(card.bgColor[4]==1,'Panels must be opaque')
@@ -122,12 +122,10 @@ p.highlightBadge:SetChecked(false);p.highlightBadge.scripts.OnClick(p.highlightB
 assert(p.highlightPersonal.enabled==false and p.highlightCommunity.enabled==false)
 p.minimapVisible:SetChecked(false);p.minimapVisible.scripts.OnClick(p.minimapVisible)
 assert(not A.db.settings.minimapVisible)
-p.hideCommentsByDefault:SetChecked(true);p.hideCommentsByDefault.scripts.OnClick(p.hideCommentsByDefault)
-assert(A.db.settings.hideCommentsByDefault)
 assert(counters.alert>=3 and counters.highlights>=1)
 local helpIcons={}
 local headings={['My Ratings']=true,['Group Rating Alerts']=true,['Player Rating Highlights']=true,
- ['Post-Party Ratings']=true,['Comment Safety']=true,['Minimap Button']=true}
+ ['Post-Party Ratings']=true,['Minimap Button']=true}
 local headingCount=0
 for _,o in ipairs(objects) do
  if o.kind=='Button' and o.width==14 and o.height==14 and o.scripts.OnEnter then helpIcons[#helpIcons+1]=o end
@@ -135,7 +133,7 @@ for _,o in ipairs(objects) do
  assert(o.text~='Preferences', 'No redundant Preferences heading')
 end
 assert(#helpIcons==0, 'Settings must contain no information icons')
-assert(headingCount==6, 'Exactly six section headings')
+assert(headingCount==5, 'Exactly five legacy section headings')
 -- The previous explanatory subtitles were removed; hint text below specific controls and the colour legend remain.
 for _,unwanted in ipairs({'Warn when someone joining your group has a low rating.',
  'Gold for 4.0+; red below 2.0. No glow for other scores.',
