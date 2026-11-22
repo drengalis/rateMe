@@ -7,9 +7,6 @@ local _, A = ...
 local GOLD = {1.00, 0.72, 0.18}
 local RED  = {1.00, 0.19, 0.22}
 local SCAN_INTERVAL = 2
-local PASSIVE_QUERY_INTERVAL = 10
-local PASSIVE_QUERIES_PER_MINUTE = 6
-local PENDING_LIMIT = 20
 
 function A:HighlightColor(guid)
     if not self.db or not self.db.settings.ratingHighlights
@@ -30,6 +27,14 @@ end
 function A:NameplateBadgeScore(guid)
     local settings = self.db and self.db.settings
     if not settings or not settings.ratingHighlights or not settings.ratingHighlightsBadge then return nil end
+    return self:IndicatorScore(guid)
+end
+
+-- One score for every star indicator (nameplate, chat): a fresh
+-- community sample first, then the player's own rating, per the source options.
+function A:IndicatorScore(guid)
+    local settings = self.db and self.db.settings
+    if not settings or not settings.ratingHighlights or type(guid) ~= "string" then return nil end
     if settings.ratingHighlightsCommunity then
         local score = self:GetFreshCommunityScore(guid)
         if type(score) == "number" and score >= 1 and score <= 5 then return score, "community" end
@@ -80,6 +85,22 @@ local function glowTexture(overlay, path)
     return texture
 end
 
+-- Nameplate additions share the layer of the visible nameplate part they
+-- are attached to (in-game: health bar/UnitFrame in MEDIUM strata, level 2;
+-- the plate container itself sits in WORLD at 100+). Drawing just above that
+-- keeps them on the nameplate, but under bags, the map and other windows,
+-- instead of on top of everything as the old HIGH strata did.
+local function matchNameplateLayer(frame, anchor, offset)
+    local ok, strata, level = pcall(function()
+        return anchor:GetFrameStrata(), anchor:GetFrameLevel()
+    end)
+    if not ok or type(strata) ~= "string" then strata = "MEDIUM" end
+    if not ok or type(level) ~= "number" then level = 1 end
+    if frame:GetFrameStrata() ~= strata then frame:SetFrameStrata(strata) end
+    if frame:GetFrameLevel() ~= level + offset then frame:SetFrameLevel(level + offset) end
+end
+A.MatchNameplateLayer = matchNameplateLayer
+
 local function makeGlow(anchor, nameplate)
     -- The overlay is deliberately not parented to a protected Blizzard frame.
     -- Its points track the visible health bar (where available) without
@@ -88,13 +109,13 @@ local function makeGlow(anchor, nameplate)
     overlay:EnableMouse(false)
     overlay:SetAllPoints(anchor)
     if nameplate then
-        overlay:SetFrameStrata("HIGH")
+        matchNameplateLayer(overlay, anchor, 1)
     else
         local ok, strata = pcall(function() return anchor:GetFrameStrata() end)
         overlay:SetFrameStrata(ok and strata or "MEDIUM")
+        local okLevel, level = pcall(function() return anchor:GetFrameLevel() end)
+        overlay:SetFrameLevel((okLevel and type(level) == "number" and level or 1) + 4)
     end
-    local ok, level = pcall(function() return anchor:GetFrameLevel() end)
-    overlay:SetFrameLevel((ok and type(level) == "number" and level or 1) + 4)
     overlay.glowTextures = {}
     local function add(path, point, relativePoint, width, height, secondary, secondaryPoint)
         local tex = glowTexture(overlay, path)
@@ -133,9 +154,7 @@ local function makeBadge(anchor)
     local badge = CreateFrame("Frame", nil, UIParent)
     badge:SetSize(46, 46)
     badge:EnableMouse(false)
-    badge:SetFrameStrata("HIGH")
-    local ok, level = pcall(function() return anchor:GetFrameLevel() end)
-    badge:SetFrameLevel((ok and type(level) == "number" and level or 1) + 6)
+    matchNameplateLayer(badge, anchor, 2)
     badge:SetPoint("RIGHT", anchor, "LEFT", -5, 0)
     local star = badge:CreateTexture(nil, "ARTWORK")
     star:SetTexture("Interface\\AddOns\\RateMe\\Media\\StarFull.tga")
@@ -189,37 +208,14 @@ local function nameplateGlowAnchor(plate)
     return unitFrame
 end
 
-function A:QueuePassiveHighlightLookup(target)
-    if not self:WantsCommunityIndicators() or not self:ValidateStoredTarget(target) then return end
+-- Background lookups for nameplates (priority 2) go through the shared
+-- lookup queue in RateMeCommunication.
+function A:QueuePassiveHighlightLookup(target, priority)
+    if not self:WantsCommunityIndicators() or isPvEInstance() then return end
+    if not self:ValidateStoredTarget(target) then return end
     local current = self:GetSummary(target.guid)
     if current and current.fresh then return end
-    if self.pendingHighlightTargets[target.guid] then return end
-    local queued = 0
-    for _ in pairs(self.pendingHighlightTargets) do queued = queued + 1 end
-    if queued >= PENDING_LIMIT then return end
-    self.pendingHighlightTargets[target.guid] = {target = target, added = self:Now()}
-end
-
-function A:ProcessPassiveHighlightLookups()
-    if not self:WantsCommunityIndicators() or isPvEInstance() then return end
-    local now = self:Now()
-    local budget = self.passiveHighlightBudget
-    if now - budget.started >= 60 then
-        budget.started, budget.count = now, 0
-    end
-    if budget.count >= PASSIVE_QUERIES_PER_MINUTE then return end
-    if now - self.lastHighlightQuery < PASSIVE_QUERY_INTERVAL then return end
-    for guid, pending in pairs(self.pendingHighlightTargets) do
-        local current = self:GetSummary(guid)
-        if current and current.fresh or now - pending.added > 35 then
-            self.pendingHighlightTargets[guid] = nil
-        elseif self:ActiveQueries() < self.MAX_PENDING and self:Query(pending.target) then
-            self.pendingHighlightTargets[guid] = nil
-            budget.count = budget.count + 1
-            self.lastHighlightQuery = now
-            return
-        end
-    end
+    self:RequestLookup(target, priority or 2)
 end
 
 function A:OnNameplateAdded(unit)
@@ -254,6 +250,7 @@ function A:OnNameplateAdded(unit)
         end
     end
     entry.unit, entry.guid = unit, target.guid
+    if entry.anchor then pcall(matchNameplateLayer, entry.overlay, entry.anchor, 1) end
     local color = self:HighlightColor(target.guid)
     if color then entry.overlay:SetRatingColor(color) else entry.overlay:Hide() end
     if self.db.settings.ratingHighlightsBadge and not entry.badge
@@ -262,6 +259,7 @@ function A:OnNameplateAdded(unit)
         if okBadge then entry.badge, entry.badgeAnchor = badge, entry.anchor end
     end
     if entry.badge then
+        if entry.anchor then pcall(matchNameplateLayer, entry.badge, entry.anchor, 2) end
         local score = self:NameplateBadgeScore(target.guid)
         if score then entry.badge:SetRating(score) else entry.badge:Hide() end
     end
@@ -362,6 +360,11 @@ function A:RefreshHighlights()
                         if okBadgeAnchor then entry.badgeAnchor = entry.anchor end
                     end
                 end
+                -- Blizzard can re-layer a recycled nameplate; follow it.
+                if entry.anchor then
+                    pcall(matchNameplateLayer, entry.overlay, entry.anchor, 1)
+                    if entry.badge then pcall(matchNameplateLayer, entry.badge, entry.anchor, 2) end
+                end
                 local color = self:HighlightColor(entry.guid)
                 if color then entry.overlay:SetRatingColor(color) else entry.overlay:Hide() end
                 if entry.badge then
@@ -398,9 +401,6 @@ function A:RefreshHighlights()
 end
 
 function A:OnHighlightSettingsChanged()
-    if not self:WantsCommunityIndicators() then
-        self.pendingHighlightTargets = {}
-    end
     self:RefreshHighlights()
     if self.db.settings.ratingHighlights and C_NamePlate and C_NamePlate.GetNamePlates then
         local ok, plates = pcall(C_NamePlate.GetNamePlates)
@@ -416,12 +416,42 @@ function A:OnHighlightSettingsChanged()
     end
 end
 
+-- Chat: a coloured star and score in front of the message of a rated player,
+-- e.g. "[Name]: <star>4.2 · hello". Names and their links are left untouched.
+local CHAT_STAR_EVENTS = {
+    "CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_WHISPER", "CHAT_MSG_PARTY",
+    "CHAT_MSG_PARTY_LEADER", "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER",
+    "CHAT_MSG_RAID_WARNING", "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER",
+    "CHAT_MSG_CHANNEL", "CHAT_MSG_INSTANCE_CHAT", "CHAT_MSG_INSTANCE_CHAT_LEADER",
+}
+
+local function chatStar(score)
+    local tint = badgeColor(score)
+    local r, g, b = math.floor(tint[1] * 255), math.floor(tint[2] * 255), math.floor(tint[3] * 255)
+    return string.format("|TInterface\\AddOns\\RateMe\\Media\\StarFull.tga:0:0:0:0:64:64:0:64:0:64:%d:%d:%d|t|cff%02x%02x%02x%.1f|r \194\183 ",
+        r, g, b, r, g, b, math.floor(score * 10 + 0.5) / 10)
+end
+
+local function chatFilter(_, _, message, ...)
+    if type(message) ~= "string" then return false end
+    local guid = select(11, ...)
+    if type(guid) ~= "string" or guid == A.myGuid then return false end
+    local ok, score = pcall(A.IndicatorScore, A, guid)
+    if not ok or not score then return false end
+    return false, chatStar(score) .. message, ...
+end
+
+function A:InitializeChatStars()
+    if self.chatStarsInstalled or not ChatFrame_AddMessageEventFilter then return end
+    for _, event in ipairs(CHAT_STAR_EVENTS) do
+        ChatFrame_AddMessageEventFilter(event, chatFilter)
+    end
+    self.chatStarsInstalled = true
+end
+
 function A:InitializeHighlights()
     self.nameplateHighlights = {}
     self.groupFrameHighlights = {}
-    self.pendingHighlightTargets = {}
-    self.passiveHighlightBudget = {started = self:Now(), count = 0}
-    self.lastHighlightQuery = self:Now() - PASSIVE_QUERY_INTERVAL
     local events = CreateFrame("Frame")
     events:RegisterEvent("NAME_PLATE_UNIT_ADDED")
     events:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
@@ -448,7 +478,7 @@ function A:InitializeHighlights()
         end
     end)
     self.highlightEvents = events
+    self:InitializeChatStars()
     C_Timer.NewTicker(SCAN_INTERVAL, function() A:RefreshHighlights() end)
-    C_Timer.NewTicker(PASSIVE_QUERY_INTERVAL, function() A:ProcessPassiveHighlightLookups() end)
     C_Timer.After(1, function() A:OnHighlightSettingsChanged() end)
 end

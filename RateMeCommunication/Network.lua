@@ -11,6 +11,18 @@ local MIN_SAMPLE_TO_STOP_EXPANDING = 5
 local MAX_RATING_RESPONSES = 100 -- distinct remote reviewers accepted per lookup
 local MAX_GLOBAL_INBOUND = 120   -- received RATEME packets per 10 seconds, per client
 local CHUNK_DELAY = 0.35 -- <= 3 messages/sec, before server throttling
+-- Outgoing lookup budget. Each lookup makes other players' clients reply and
+-- forward on our behalf, so automatic lookups (tooltips, nameplates, group
+-- alerts) are spaced out and capped. Lookups the player starts
+-- (opening a rating or reviews window, Refresh) always go, but still count.
+local LOOKUP_MIN_INTERVAL = 2    -- seconds between automatic lookups
+local LOOKUP_PER_MINUTE = 15     -- all lookups, per rolling 60-second window
+-- Automatic lookups that cannot start yet wait in one shared queue and start
+-- as soon as the budget allows. Priority 1: tooltips and group alerts.
+-- Priority 2: nameplates, which also keep their own lower cap.
+local LOOKUP_QUEUE_MAX = 30
+local LOOKUP_QUEUE_TTL = {60, 35}           -- seconds an entry may wait, by priority
+local BACKGROUND_LOOKUPS_PER_MINUTE = 6     -- priority-2 starts per minute
 
 local function stableHash(value)
     local h = 0
@@ -110,15 +122,9 @@ function A:AllowInbound(sender, kind)
         global = {started = now, count = 0}
         self.globalInbound = global
     end
-    if global.count >= MAX_GLOBAL_INBOUND then
-        self:BumpNetworkStat("droppedGlobal")
-        if not global.reported then
-            self:Debug("Paused processing incoming addon messages: too many arrived in a short period. New messages will be accepted when the limit resets.")
-            global.reported = true
-        end
-        return false
-    end
-    global.count = global.count + 1
+    -- Per-sender limit first: messages from a player who is over their own
+    -- limit are dropped WITHOUT using the shared allowance, so one flooding
+    -- client cannot crowd out everyone else's lookups and ratings.
     if not self:UnderInboundLimit(sender, kind=="shared" and "sharedReplies" or "all", kind=="shared" and 100 or 18, 20) then
         self:BumpNetworkStat("droppedPeer")
         global.reportedPeers = global.reportedPeers or {}
@@ -130,6 +136,15 @@ function A:AllowInbound(sender, kind)
         end
         return false
     end
+    if global.count >= MAX_GLOBAL_INBOUND then
+        self:BumpNetworkStat("droppedGlobal")
+        if not global.reported then
+            self:Debug("Paused processing incoming addon messages: too many arrived in a short period. New messages will be accepted when the limit resets.")
+            global.reported = true
+        end
+        return false
+    end
+    global.count = global.count + 1
     self:BumpNetworkStat("received")
     return true
 end
@@ -214,15 +229,95 @@ function A:SendQueryWave(id, maximum)
     return sent
 end
 
-function A:Query(target, force)
-    if not self:ValidateStoredTarget(target) then return false end
+-- Start a lookup now if possible, otherwise queue it. Returns true when the
+-- lookup started, is queued, is already running or is not needed (fresh).
+function A:RequestLookup(target, priority)
+    priority = priority == 2 and 2 or 1
+    local started, reason = self:Query(target)
+    if started or reason == "fresh" or reason == "running" then return true end
+    if reason ~= "busy" and reason ~= "budget" then return false end
+    local queue = self.lookupQueue or {}
+    self.lookupQueue = queue
+    for _, entry in ipairs(queue) do
+        if entry.target.guid == target.guid then
+            if priority < entry.priority then entry.priority = priority end
+            return true
+        end
+    end
+    if #queue >= LOOKUP_QUEUE_MAX then
+        -- Full: make room by dropping the oldest lowest-priority entry, but
+        -- never drop a priority-1 entry for a priority-2 one.
+        local drop
+        for index = #queue, 1, -1 do
+            if queue[index].priority >= priority and (not drop or queue[index].priority >= queue[drop].priority) then
+                drop = index
+            end
+        end
+        if not drop then return false end
+        for index = 1, #queue do
+            if queue[index].priority == queue[drop].priority then drop = index; break end
+        end
+        table.remove(queue, drop)
+    end
+    queue[#queue + 1] = {target = target, priority = priority, added = self:Now()}
+    self:BumpNetworkStat("queuedLookups")
+    return true
+end
+
+function A:ProcessLookupQueue()
+    local queue = self.lookupQueue
+    if not queue or #queue == 0 then return end
+    local now = self:Now()
+    for index = #queue, 1, -1 do
+        local entry = queue[index]
+        if now - entry.added > LOOKUP_QUEUE_TTL[entry.priority] then table.remove(queue, index) end
+    end
+    local background = self.backgroundLookupBudget
+    if not background or now - background.started >= 60 then
+        background = {started = now, count = 0}
+        self.backgroundLookupBudget = background
+    end
+    -- Oldest priority-1 entry first, then the oldest priority-2 entry.
+    for _, wanted in ipairs({1, 2}) do
+        for index, entry in ipairs(queue) do
+            if entry.priority == wanted then
+                if wanted == 2 and background.count >= BACKGROUND_LOOKUPS_PER_MINUTE then break end
+                local started, reason = self:Query(entry.target)
+                if started then
+                    table.remove(queue, index)
+                    if wanted == 2 then background.count = background.count + 1 end
+                    return
+                elseif reason == "busy" or reason == "budget" then
+                    return -- try again on the next tick
+                else
+                    table.remove(queue, index) -- fresh, running or no longer valid
+                    return
+                end
+            end
+        end
+    end
+end
+
+function A:Query(target, force, interactive)
+    if not self:ValidateStoredTarget(target) then return false, "invalid" end
     self:RememberTarget(target)
     local c = self.runtime.cache[target.guid]
     local t = self:Now()
-    if not force and c and c.fetchedAt and t - c.fetchedAt < self.CACHE_SECONDS then return false end
+    if not force and c and c.fetchedAt and t - c.fetchedAt < self.CACHE_SECONDS then return false, "fresh" end
     -- Coalesce lookups of the same player, even when a forced refresh is requested.
-    if c and c.queryUntil and t < c.queryUntil then return false end
-    if self:ActiveQueries() >= self.MAX_PENDING then return false end
+    if c and c.queryUntil and t < c.queryUntil then return false, "running" end
+    if self:ActiveQueries() >= self.MAX_PENDING then return false, "busy" end
+    local budget = self.lookupBudget
+    if not budget or t - budget.started >= 60 then
+        budget = {started = t, count = 0, last = budget and budget.last or 0}
+        self.lookupBudget = budget
+    end
+    if not interactive and (budget.count >= LOOKUP_PER_MINUTE
+        or t - budget.last < LOOKUP_MIN_INTERVAL) then
+        self:BumpNetworkStat("deferredLookups")
+        return false, "budget"
+    end
+    budget.count, budget.last = budget.count + 1, t
     local id = self:NewRequestID()
     local pending = {id = id, guid = target.guid, target = target,
         expires = t + self.QUERY_SECONDS, votes = {}, revisions = {},
@@ -303,6 +398,9 @@ function A:FinishQuery(id)
     cache.queryUntil = nil
     cache.lastComplete = self:Stamp()
     self.runtime.cache[guid] = cache
+    -- The own vote above was captured when the lookup started; if the player
+    -- removed or changed their rating meanwhile, use the current one instead.
+    if self.SyncOwnCachedVote then self:SyncOwnCachedVote(guid) end
     local summary = self:GetSummary(guid)
     self:RememberTarget(target)
     self:SaveLookupSummary(guid, summary)
@@ -514,6 +612,7 @@ function A:InitializeNetwork()
             if deadline < self:Now() then self.runtime.seen[id] = nil end
         end
     end)
+    C_Timer.NewTicker(0.5, function() self:ProcessLookupQueue() end)
     C_Timer.NewTicker(15, function() self:PruneInbound(); self:PruneReviewTags(); self:PruneSharedLookups(); self:EnsureBroadcastChannel() end)
     C_Timer.After(3 + jitter(1.5), function() self:Discovery(); self:OnGroupRosterUpdate() end)
 end

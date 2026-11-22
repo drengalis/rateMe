@@ -2,6 +2,8 @@ local _, A = ...
 local GOLD = {1, 0.72, 0.28}
 local WHITE = {0.93, 0.91, 0.86}
 local MUTED = {0.60, 0.64, 0.70}
+-- Neutral bronze used by the default UI's frame trim, for rules and borders.
+local BRONZE = {0.55, 0.45, 0.25}
 
 -- One set of coordinates for both list headings and their row contents.
 -- Headers are positioned on the main window, while rows are relative to the
@@ -14,14 +16,48 @@ local LIST_COLUMNS = {
     date = {x = 418, width = 237},
 }
 
--- Windows use Blizzard's own BasicFrameTemplate, the same chrome as the
--- built-in game windows: a titlebar with the window title, the standard X
--- close button (f.CloseButton, which hides the window) and matching borders.
--- If a client ever lacks the template, fall back to the previous dialog look.
+-- Windows use Blizzard's own PortraitFrameTemplate, the same chrome as the
+-- Character window: bronze frame, round portrait in the top-left corner (the
+-- Rate Me! star), centred title and the standard X close button. Older or
+-- unusual clients fall back to BasicFrameTemplate, then to the old dialog look.
+local WINDOW_TEMPLATES = {"PortraitFrameTemplate", "BasicFrameTemplate"}
+
+local function setWindowPortrait(f)
+    local portrait = (f.PortraitContainer and f.PortraitContainer.portrait)
+        or f.portrait or f.Portrait or _G[f:GetName() .. "Portrait"]
+    if not portrait then return end
+    -- Dark round backing (same art as the minimap button), then the star on top.
+    if SetPortraitToTexture then
+        SetPortraitToTexture(portrait, "Interface\\AddOns\\RateMe\\Media\\MinimapCircle.tga")
+    else
+        portrait:SetTexture("Interface\\AddOns\\RateMe\\Media\\MinimapCircle.tga")
+    end
+    local host = portrait:GetParent() or f
+    local star = host:CreateTexture(nil, "OVERLAY", nil, 7)
+    star:SetTexture(A.STAR_FULL_TEXTURE)
+    local size = (portrait.GetWidth and portrait:GetWidth()) or 60
+    if not size or size <= 0 then size = 60 end
+    -- The portrait art sits slightly right of and below the visible ring in
+    -- this client; nudge the star left and up (about 4% of the portrait) so it
+    -- is centred in the circle (measured from in-game screenshots).
+    star:SetPoint("CENTER", portrait, "CENTER", -1.5, size * 0.037)
+    star:SetSize(size * 0.62, size * 0.62)
+    f.portraitStar = star
+end
+
 local function makeFrame(name, width, height, title)
-    local ok, f = pcall(CreateFrame, "Frame", name, UIParent, "BasicFrameTemplate")
-    if not ok or not f or not (f.CloseButton or f.TitleBg or _G[name .. "CloseButton"]) then
-        if ok and f then f:Hide() end
+    local f
+    for _, template in ipairs(WINDOW_TEMPLATES) do
+        local ok, created = pcall(CreateFrame, "Frame", name, UIParent, template)
+        if ok and created and (created.CloseButton or _G[name .. "CloseButton"]) then
+            f = created
+            f.rateMeTemplate = template
+            break
+        elseif ok and created then
+            created:Hide()
+        end
+    end
+    if not f then
         f = CreateFrame("Frame", name, UIParent, "BackdropTemplate")
         f:SetBackdrop({
             bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -29,7 +65,7 @@ local function makeFrame(name, width, height, title)
             tile = false, edgeSize = 28,
             insets = {left = 8, right = 8, top = 8, bottom = 8},
         })
-        f:SetBackdropColor(0.055, 0.065, 0.09, 1)
+        f:SetBackdropColor(0.04, 0.04, 0.04, 1)
         local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
         close:SetPoint("TOPRIGHT", -5, -5)
         f.CloseButton = close
@@ -38,27 +74,42 @@ local function makeFrame(name, width, height, title)
     if f.CloseButton then
         f.CloseButton:SetScript("OnClick", function() f:Hide() end)
     end
-    f.TitleText = f.TitleText or _G[name .. "TitleText"]
-    if not f.TitleText then
-        f.TitleText = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        f.TitleText:SetPoint("TOP", f, "TOP", 0, -6)
+    title = title or A.title or "Rate Me!"
+    f.TitleText = f.TitleText or (f.TitleContainer and f.TitleContainer.TitleText)
+        or _G[name .. "TitleText"]
+    if f.SetTitle then
+        f:SetTitle(title)
+    else
+        if not f.TitleText then
+            f.TitleText = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            f.TitleText:SetPoint("TOP", f, "TOP", 0, -6)
+        end
+        f.TitleText:SetText(title)
     end
-    f.TitleText:SetText(title or A.title or "Rate Me!")
+    if f.rateMeTemplate == "PortraitFrameTemplate" then setWindowPortrait(f) end
     f:SetSize(width, height)
+    f.defaultWidth, f.defaultHeight = width, height
     f:SetPoint("CENTER")
-    f:SetFrameStrata("DIALOG")
+    -- Same layer as the game's own windows (Character, Spellbook, ...), so
+    -- bags, the map and Blizzard popups behave normally around Rate Me!.
+    -- Top-level windows come to the front when clicked, like the default UI.
+    f:SetFrameStrata("MEDIUM")
+    f:SetToplevel(true)
     f:SetClampedToScreen(true)
     f:SetMovable(true)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", function(self) self:StartMoving() end)
-    f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        if A.SaveWindowPlacement then A:SaveWindowPlacement(self) end
+    end)
     -- Opaque layer beneath the template's (partly transparent) background so
     -- the game world never shows through the window contents.
     local background = f:CreateTexture(nil, "BACKGROUND", nil, -8)
     background:SetPoint("TOPLEFT", f, "TOPLEFT", 2, -2)
     background:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -2, 2)
-    background:SetColorTexture(0.055, 0.065, 0.09, 1)
+    background:SetColorTexture(0.04, 0.04, 0.04, 1)
     f:SetAlpha(1)
     -- WoW closes named frames registered here when Escape is pressed.
     if UISpecialFrames then
@@ -69,6 +120,7 @@ local function makeFrame(name, width, height, title)
         if not found then table.insert(UISpecialFrames, name) end
     end
     f:SetScript("OnShow", function(self)
+        self:Raise()
         if A.MarkWindowShown then A:MarkWindowShown(self) end
         if A.ArrangeWindows then A:ArrangeWindows() end
     end)
@@ -99,20 +151,68 @@ local function makeResizable(f, minWidth, minHeight, maxWidth, maxHeight)
     grip:SetScript("OnMouseDown", function(_, mouseButton)
         if mouseButton == "LeftButton" then f:StartSizing("BOTTOMRIGHT") end
     end)
-    grip:SetScript("OnMouseUp", function() f:StopMovingOrSizing() end)
+    grip:SetScript("OnMouseUp", function()
+        f:StopMovingOrSizing()
+        if A.SaveWindowPlacement then A:SaveWindowPlacement(f) end
+    end)
     f.resizeGrip = grip
     return grip
 end
 
+-- Remember where the player put each window (and its size, if resizable), per
+-- account in RateMeDB.windows, keyed by the window's frame name. Positions are
+-- stored with the window's scale so a restored window lands on the same pixels.
+local function windowStore()
+    local db = A.db
+    if type(db) ~= "table" then return nil end
+    if type(db.windows) ~= "table" then db.windows = {} end
+    return db.windows
+end
+
+function A:SaveWindowPlacement(frame)
+    local store = windowStore()
+    local name = frame and frame:GetName()
+    if not store or not name then return end
+    local left, top = frame:GetLeft(), frame:GetTop()
+    if type(left) ~= "number" or type(top) ~= "number" then return end
+    store[name] = {
+        left = left, top = top, scale = frame:GetScale(),
+        width = frame:IsResizable() and frame:GetWidth() or nil,
+        height = frame:IsResizable() and frame:GetHeight() or nil,
+    }
+end
+
+-- Returns true when the window has a remembered placement and was restored.
+function A:RestoreWindowPlacement(frame)
+    local store = windowStore()
+    local saved = store and frame and frame:GetName() and store[frame:GetName()]
+    if type(saved) ~= "table" or type(saved.left) ~= "number" or type(saved.top) ~= "number" then
+        return false
+    end
+    local scale = tonumber(saved.scale) or 1
+    if scale <= 0 then scale = 1 end
+    frame:SetScale(scale)
+    if frame:IsResizable() and type(saved.width) == "number" and type(saved.height) == "number" then
+        frame:SetSize(saved.width, saved.height)
+    end
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", saved.left, saved.top)
+    return true
+end
+
 -- Tile the visible windows into one horizontal row, centred on the screen.
 -- Sizes are in UIParent coordinates; a common scale ensures even small screens
--- never put one Rate Me! window on top of another.
+-- never put one Rate Me! window on top of another. Windows the player has
+-- moved or resized keep their remembered placement and are left out of the row.
 function A:ArrangeWindows()
     if not UIParent or not UIParent.GetWidth or not UIParent.GetHeight then return end
     local frames = {}
     local totalWidth, maxHeight = 0, 0
     for _, windowName in ipairs({"main", "editor", "reviews", "partyReview"}) do
         local frame = self[windowName]
+        if frame and frame:IsShown() and self:RestoreWindowPlacement(frame) then
+            frame = nil
+        end
         if frame and frame:IsShown() then
             frames[#frames + 1] = frame
             totalWidth = totalWidth + frame:GetWidth()
@@ -240,7 +340,8 @@ function A:CreateMainWindow()
     -- The window title lives in the Blizzard titlebar. Below it, one header
     -- row holds the tagline (left) and the navigation tabs (right-aligned, so
     -- they stay at the right edge when the window is resized).
-    f.tagline = label(f, "GameFontDisableSmall", "Reputation earned. Reputation shared.", 26, -48, 325, "LEFT")
+    -- x = 66 keeps the tagline clear of the round portrait in the top-left corner.
+    f.tagline = label(f, "GameFontDisableSmall", "Reputation earned. Reputation shared.", 66, -48, 300, "LEFT")
     f.tab = "mine"
     f.pages = {mine = 1, recent = 1}
     f.tabMine = button(f, "My Ratings", 107, 27, 370, -38, function()
@@ -266,7 +367,7 @@ function A:CreateMainWindow()
     local function divider(y)
         local line = f:CreateTexture(nil, "ARTWORK")
         line:SetHeight(1)
-        line:SetColorTexture(0.30, 0.35, 0.43, 0.9)
+        line:SetColorTexture(BRONZE[1], BRONZE[2], BRONZE[3], 0.9)
         line:SetPoint("TOPLEFT", f, "TOPLEFT", 29, y)
         line:SetPoint("TOPRIGHT", f, "TOPRIGHT", -29, y)
         return line
@@ -275,13 +376,13 @@ function A:CreateMainWindow()
     -- A fine line also fixes the column headings visually above scrolling rows.
     f.listHeadingDivider = f:CreateTexture(nil, "ARTWORK")
     f.listHeadingDivider:SetHeight(1)
-    f.listHeadingDivider:SetColorTexture(0.30, 0.35, 0.43, 0.55)
+    f.listHeadingDivider:SetColorTexture(BRONZE[1], BRONZE[2], BRONZE[3], 0.6)
     f.listHeadingDivider:SetPoint("TOPLEFT", f, "TOPLEFT", LIST_VIEWPORT_X, -117)
     f.listHeadingDivider:SetPoint("TOPRIGHT", f, "TOPRIGHT", -50, -117)
     -- Pagination belongs to the results area. Put the divider *below* its
     -- controls, then use the darker footer only for Search and Clear.
     f.footerBackground = f:CreateTexture(nil, "BACKGROUND", nil, -7)
-    f.footerBackground:SetColorTexture(0.038, 0.045, 0.065, 1)
+    f.footerBackground:SetColorTexture(0, 0, 0, 0.35)
     -- Footer and pager are anchored to the bottom edge so they follow resizing.
     -- Offsets are the original top-based positions converted for MAIN_HEIGHT.
     f.footerBackground:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 25, MAIN_HEIGHT - 506)
@@ -398,7 +499,7 @@ function A:CreateSettingsPanel()
     -- hard-coded 665/640 widths that left a large unused strip on the right.
     -- Match future size changes (including UI-scale changes) automatically.
     local p = CreateFrame("Frame", nil, scroll)
-    p:SetSize(699, 1397) -- seven responsive sections, including communication controls
+    p:SetSize(699, 1542) -- eight responsive sections, including communication and reset
     scroll:SetScrollChild(p)
     scroll.content = p
     scroll:SetScript("OnSizeChanged", function(_, width)
@@ -423,8 +524,8 @@ function A:CreateSettingsPanel()
         card:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
             edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1,
             insets = { left = 1, right = 1, top = 1, bottom = 1 } })
-        card:SetBackdropColor(0.11, 0.13, 0.18, 1)
-        card:SetBackdropBorderColor(0.28, 0.33, 0.41, 1)
+        card:SetBackdropColor(0, 0, 0, 0.35)
+        card:SetBackdropBorderColor(BRONZE[1], BRONZE[2], BRONZE[3], 1)
         -- A previous 3px gold accent rendered as a stray glyph beside headings
         -- on Forever. Keep the gold heading without that decorative bar.
         local titleText = label(card, "GameFontNormalLarge", title, 20, -12)
@@ -434,7 +535,7 @@ function A:CreateSettingsPanel()
 
     local function rule(card, y)
         local tex = card:CreateTexture(nil, "ARTWORK")
-        tex:SetColorTexture(0.31, 0.36, 0.44, 1)
+        tex:SetColorTexture(BRONZE[1], BRONZE[2], BRONZE[3], 0.7)
         tex:SetHeight(1)
         tex:SetPoint("TOPLEFT", card, "TOPLEFT", 20, -y)
         tex:SetPoint("TOPRIGHT", card, "TOPRIGHT", -20, -y)
@@ -493,7 +594,7 @@ function A:CreateSettingsPanel()
         return slider, value, heading
     end
 
-    local myRatings = section(12, 90, "My Ratings")
+    local myRatings = section(12, 125, "My Ratings")
     p.allCharacters, p.allCharactersRow, p.allCharactersLabel = checkbox(myRatings,
         "allCharacters", "Show ratings from all my characters in My Ratings", 19, 51,
         function()
@@ -502,8 +603,10 @@ function A:CreateSettingsPanel()
             self.main.pages.mine = 1
             self.main.selected = nil
         end)
+    p.confirmRemoveRating, p.confirmRemoveRatingRow, p.confirmRemoveRatingLabel = checkbox(myRatings,
+        "confirmRemoveRating", "Ask for confirmation before removing one of my ratings", 19, 86)
 
-    local alerts = section(121, 345, "Group Rating Alerts")
+    local alerts = section(156, 345, "Group Rating Alerts")
     p.enabled, p.enabledRow, p.enabledLabel = checkbox(alerts, "lowRatingAlerts",
         "Show a warning when a low-rated player joins my group", 19, 51,
         function() A:OnAlertSettingsChanged() end)
@@ -521,7 +624,7 @@ function A:CreateSettingsPanel()
         "RateMeAlertThresholdSlider", "lowRatingThreshold",
         "Warn if community rating is at or below", 263)
 
-    local highlights = section(485, 288, "Player Rating Highlights")
+    local highlights = section(520, 288, "Player Rating Highlights")
     p.highlights, p.highlightsRow, p.highlightsLabel = checkbox(highlights, "ratingHighlights",
         "Enable rating indicators for friendly players", 19, 51,
         function() A:OnHighlightSettingsChanged() end)
@@ -543,7 +646,7 @@ function A:CreateSettingsPanel()
         "Badge: community first, then personal.  Gold: 4.0+   Red: below 2.0", 47, -261, 610)
     legend:SetTextColor(unpack(MUTED))
 
-    local party = section(792, 109, "Post-Party Ratings")
+    local party = section(827, 109, "Post-Party Ratings")
     p.partyReviewPrompt, p.partyReviewPromptRow, p.partyReviewPromptLabel = checkbox(party,
         "partyReviewPrompt", "Open the party rating popup when I leave a party", 19, 51,
         function() if not A.db.settings.partyReviewPrompt then A.pendingPartyReview = nil end end)
@@ -551,7 +654,7 @@ function A:CreateSettingsPanel()
         "Dismiss with Escape. Reopen the last party with /rateme party.", 55, -84, 545)
     partyHint:SetTextColor(unpack(MUTED))
 
-    local minimap = section(920, 109, "Minimap Button")
+    local minimap = section(955, 109, "Minimap Button")
     p.minimapVisible, p.minimapVisibleRow, p.minimapVisibleLabel = checkbox(minimap,
         "minimapVisible", "Show the movable Rate Me! button on my minimap", 19, 51,
         function() A:SetMinimapVisible(A.db.settings.minimapVisible) end)
@@ -559,7 +662,7 @@ function A:CreateSettingsPanel()
         "Left-click: open     Left-drag: move     /rateme: always available", 55, -84, 545)
     miniHint:SetTextColor(unpack(MUTED))
 
-    local communication = section(1048, 220, "Communication")
+    local communication = section(1083, 220, "Communication")
     p.sendRatingBroadcasts = checkbox(communication, "sendRatingBroadcasts",
         "Announce my new, edited and removed ratings to other users", 19, 42,
         function() A:OnCommunicationSettingsChanged() end)
@@ -589,19 +692,68 @@ function A:CreateSettingsPanel()
     local networkHint = label(communication, "GameFontDisableSmall",
         "Peers may forward lookups. Broadcast reach depends on available game channels.", 55, -190, 580)
 
-    local diagnostics = section(1288, 90, "Diagnostics")
+    local diagnostics = section(1323, 90, "Diagnostics")
     p.debug, p.debugRow, p.debugLabel = checkbox(diagnostics,
         "debug", "Show rating and peer-to-peer activity in chat (debug)", 19, 51)
+
+    local reset = section(1433, 98, "Reset")
+    p.resetDefaults = button(reset, "Reset to Default", 160, 26, 19, -46, function()
+        A:ConfirmResetToDefaults()
+    end)
+    local resetHint = label(reset, "GameFontHighlightSmall",
+        "Restores every setting and all window positions and sizes. Your ratings are kept.",
+        190, -52, 470, "LEFT")
+    resetHint:SetTextColor(unpack(MUTED))
 
     -- Preserve original controls/aliases for any current callers or testing.
     for _, name in ipairs({"enabled", "alertPersonal", "alertCommunity", "threshold", "thresholdValue",
         "personalThreshold", "personalThresholdValue", "highlights", "highlightGlow", "highlightBadge",
         "highlightPersonal", "highlightCommunity", "minimapVisible", "partyReviewPrompt",
-        "allCharacters", "debug"}) do
+        "allCharacters", "confirmRemoveRating", "debug"}) do
         scroll[name] = p[name]
     end
     self.main.settingsPanel = scroll
     scroll:Hide()
+end
+
+-- Blizzard's standard Yes/Cancel confirmation popup for Reset to Default.
+function A:ConfirmResetToDefaults()
+    if not StaticPopupDialogs or not StaticPopup_Show then
+        self:ResetToDefaults()
+        return
+    end
+    StaticPopupDialogs.RATEME_RESET_DEFAULTS = StaticPopupDialogs.RATEME_RESET_DEFAULTS or {
+        text = "Reset all Rate Me! settings, window positions and window sizes to their defaults?\n\nYour ratings are kept.",
+        button1 = "Reset",
+        button2 = CANCEL or "Cancel",
+        OnAccept = function() A:ResetToDefaults() end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        showAlert = true,
+        preferredIndex = 3,
+    }
+    StaticPopup_Show("RATEME_RESET_DEFAULTS")
+end
+
+-- Settings > Reset to Default, then apply each restored setting immediately.
+function A:ResetToDefaults()
+    if not self:ResetSettingsToDefault() then return end
+    for _, windowName in ipairs({"main", "editor", "reviews", "partyReview"}) do
+        local frame = self[windowName]
+        if frame and frame.defaultWidth then
+            frame:SetSize(frame.defaultWidth, frame.defaultHeight)
+        end
+    end
+    if self.main and self.main.pages then self.main.pages.mine = 1 end
+    if self.OnAlertSettingsChanged then self:OnAlertSettingsChanged() end
+    if self.OnHighlightSettingsChanged then self:OnHighlightSettingsChanged() end
+    if self.OnCommunicationSettingsChanged then self:OnCommunicationSettingsChanged() end
+    if self.PositionMinimapButton then self:PositionMinimapButton() end
+    if self.SetMinimapVisible then self:SetMinimapVisible(self.db.settings.minimapVisible) end
+    self:ArrangeWindows()
+    self:DrawSettings()
+    self:Log("All settings and window positions were reset to their defaults.")
 end
 
 function A:DrawSettings()
@@ -610,6 +762,7 @@ function A:DrawSettings()
     local p = f.settingsPanel.content
     local settings = self.db.settings
     p.allCharacters:SetChecked(settings.allCharacters)
+    p.confirmRemoveRating:SetChecked(settings.confirmRemoveRating)
     p.debug:SetChecked(settings.debug)
     p.sendRatingBroadcasts:SetChecked(settings.sendRatingBroadcasts)
     p.receiveRatingBroadcasts:SetChecked(settings.receiveRatingBroadcasts)
@@ -672,7 +825,7 @@ function A:CreateMainRow(index)
     b:SetPoint("TOPRIGHT", f.content, "TOPRIGHT", 0, -(index - 1) * 40)
     local tex = b:CreateTexture(nil, "BACKGROUND")
     tex:SetAllPoints()
-    tex:SetColorTexture(0.19, 0.23, 0.30, index % 2 == 0 and 0.4 or 0.2)
+    tex:SetColorTexture(0, 0, 0, index % 2 == 0 and 0.45 or 0.2)
     b.nameText = label(b, "GameFontHighlight", "",
         LIST_COLUMNS.player.x, -7, LIST_COLUMNS.player.width, "RIGHT")
     b.subText = label(b, "GameFontDisableSmall", "",
@@ -800,7 +953,9 @@ end
 function A:CreateTagSelection(parent, window, x, y, width, changed, sidebar)
     local c=CreateFrame("Frame",nil,parent)
     local compact=sidebar and sidebar.compact
-    c:SetSize(width,compact and 30 or (sidebar and 60 or 410))
+    -- Vertical: the three chosen chips are stacked, one per row (rating editor).
+    c.vertical=sidebar and sidebar.vertical
+    c:SetSize(width,compact and 30 or (c.vertical and 131) or (sidebar and 60 or 410))
     c:SetPoint("TOPLEFT",parent,"TOPLEFT",x,y)
     c.tags,c.window,c.changed,c.tagWidth={},window,changed,width
     -- Optional: called when a chip is clicked (party rows select themselves).
@@ -822,8 +977,8 @@ function A:CreateTagSelection(parent, window, x, y, width, changed, sidebar)
         chip:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",
             edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",edgeSize=8,
             insets={left=3,right=3,top=3,bottom=3}})
-        chip:SetBackdropColor(0.07,0.08,0.11,1)
-        chip:SetBackdropBorderColor(0.38,0.42,0.48,1)
+        chip:SetBackdropColor(0.05,0.05,0.05,1)
+        chip:SetBackdropBorderColor(BRONZE[1],BRONZE[2],BRONZE[3],1)
         chip.caption=label(chip,"GameFontHighlight","",8,0)
         chip.caption:ClearAllPoints()
         chip.caption:SetPoint("LEFT",chip,"LEFT",8,0)
@@ -900,7 +1055,15 @@ function A:RefreshTagSelection(control)
     local slotWidth=(control.tagWidth-2*gap)/3
     for n,chip in ipairs(control.chips) do
         local id=control.tags[n]
-        if id then
+        if id and control.vertical then
+            local width=control.tagWidth
+            chip:SetWidth(width)
+            chip:ClearAllPoints()
+            chip:SetPoint("TOPLEFT",control,"TOPLEFT",0,(control.chipY or -29)-(n-1)*(30+gap))
+            chip.caption:SetText(self:ReviewTagText(id))
+            chip.caption:SetWidth(math.max(1,width-padding))
+            chip:Show()
+        elseif id then
             local left=math.floor((n-1)*(slotWidth+gap))
             local right=math.floor(n*slotWidth+(n-1)*gap)
             local width=right-left
@@ -963,7 +1126,9 @@ function A:ToggleSelectionTag(control,id)
 end
 
 function A:CreateEditorWindow()
-    local f = makeFrame("RateMeEditorWindow", 960, 530, "Rate Me!")
+    -- Left column: player, community rating, your stars, then your chosen tags
+    -- stacked below them. Right column: the tag choices. Buttons underneath.
+    local f = makeFrame("RateMeEditorWindow", 960, 480, "Rate Me!")
     f.targetText = label(f, "GameFontHighlight", "", 28, -58, 450)
     label(f, "GameFontNormal", "Community rating", 28, -89)
     f.community = label(f, "GameFontHighlight", "", 28, -111, 452)
@@ -986,9 +1151,10 @@ function A:CreateEditorWindow()
     -- Personal rating uses interactive star textures, plus a numeric score beside them.
     f.selectedNumeric = label(f, "GameFontHighlight", "", 405, -194, 74)
     f.scoreText = label(f, "GameFontHighlightSmall", "", 28, -232, 430)
-    label(f, "GameFontNormal", "Your tags (optional)", 28, -395)
-    f.tagControl = self:CreateTagSelection(f, f, 28, -417, 904, nil, {x=496,y=-70,width=432})
-    f.save = button(f, "Save Rating", 125, 26, 28, -486, function()
+    label(f, "GameFontNormal", "Your tags (optional)", 28, -262)
+    f.tagControl = self:CreateTagSelection(f, f, 28, -284, 452, nil,
+        {x=496, y=-70, width=432, vertical=true})
+    f.save = button(f, "Save Rating", 125, 26, 28, -431, function()
         local ok, err = A:SaveOwnRating(f.target, f.score, f.tagControl.tags)
         if ok then
             f:Hide()
@@ -997,14 +1163,88 @@ function A:CreateEditorWindow()
             A:Log(err or "Unable to save rating")
         end
     end)
-    f.remove = button(f, "Remove", 86, 26, 158, -486, function()
-        if A:DeleteOwnRating(f.target) then
-            A:Log("Removed your rating for " .. A:DisplayName(f.target.name))
-            f:Hide()
+    local function removeRating(target)
+        if A:DeleteOwnRating(target) then
+            A:Log("Removed your rating for " .. A:DisplayName(target.name))
+            -- Only close the editor if it still shows the same player.
+            if f.target == target then f:Hide() end
         end
+    end
+    f.remove = button(f, "Remove", 86, 26, 158, -431, function()
+        local target = f.target
+        if not target then return end
+        if not A.db.settings.confirmRemoveRating then
+            removeRating(target)
+            return
+        end
+        A:ShowRemoveRatingConfirm(target, removeRating)
     end)
-    button(f, "Cancel", 112, 26, 250, -486, function() f:Hide() end)
+    button(f, "Cancel", 112, 26, 250, -431, function() f:Hide() end)
     self.editor = f
+end
+
+-- Confirmation for removing a rating, styled like Blizzard's own popups but
+-- with a "Don't ask again" checkbox, which the stock StaticPopup lacks.
+-- Ticking it and confirming turns off Settings > My Ratings > confirmation.
+function A:ShowRemoveRatingConfirm(target, onAccept)
+    local d = self.removeConfirm
+    if not d then
+        d = CreateFrame("Frame", "RateMeRemoveRatingConfirm", UIParent, "BackdropTemplate")
+        d:SetWidth(400)
+        d:SetFrameStrata("DIALOG")
+        d:SetToplevel(true)
+        d:SetClampedToScreen(true)
+        d:EnableMouse(true)
+        d:SetPoint("TOP", UIParent, "TOP", 0, -135)
+        d:SetBackdrop({
+            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            tile = true, tileSize = 32, edgeSize = 32,
+            insets = {left = 11, right = 12, top = 12, bottom = 11},
+        })
+        local icon = d:CreateTexture(nil, "ARTWORK")
+        icon:SetTexture("Interface\\DialogFrame\\UI-Dialog-Icon-AlertNew")
+        icon:SetSize(48, 48)
+        icon:SetPoint("TOPLEFT", d, "TOPLEFT", 24, -20)
+        d.text = d:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        d.text:SetPoint("TOPLEFT", d, "TOPLEFT", 84, -22)
+        d.text:SetWidth(292)
+        d.text:SetJustifyH("LEFT")
+        d.dontAsk = CreateFrame("CheckButton", nil, d, "UICheckButtonTemplate")
+        d.dontAsk:SetSize(26, 26)
+        -- Bottom row: "Don't ask again" on the left, buttons on the right.
+        d.dontAsk:SetPoint("BOTTOMLEFT", d, "BOTTOMLEFT", 20, 16)
+        local caption = d:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        caption:SetPoint("LEFT", d.dontAsk, "RIGHT", 2, 1)
+        caption:SetText("Don't ask again")
+        d.accept = button(d, "Remove", 100, 22, 0, 0, function()
+            local data = d.data
+            if d.dontAsk:GetChecked() then
+                A:SetSetting("confirmRemoveRating", false)
+                A:DrawSettings()
+            end
+            d.data = nil
+            d:Hide()
+            if data then data.onAccept(data.target) end
+        end)
+        d.accept:ClearAllPoints()
+        d.accept:SetPoint("BOTTOMRIGHT", d, "BOTTOMRIGHT", -128, 18)
+        d.cancel = button(d, CANCEL or "Cancel", 100, 22, 0, 0, function() d:Hide() end)
+        d.cancel:ClearAllPoints()
+        d.cancel:SetPoint("BOTTOMRIGHT", d, "BOTTOMRIGHT", -20, 18)
+        d:SetScript("OnHide", function(frame) frame.data = nil end)
+        if UISpecialFrames then table.insert(UISpecialFrames, "RateMeRemoveRatingConfirm") end
+        d:Hide()
+        self.removeConfirm = d
+    end
+    d.data = {target = target, onAccept = onAccept}
+    d.text:SetText("Remove your rating for " .. self:DisplayName(target.name)
+        .. "?")
+    d.dontAsk:SetChecked(false)
+    local textHeight = d.text:GetStringHeight() or 40
+    d:SetHeight(math.max(110, 22 + textHeight + 20 + 22 + 18))
+    d:Show()
+    d:Raise()
 end
 
 function A:UpdateEditorStars()
@@ -1046,16 +1286,17 @@ function A:OpenEditor(target)
     self:UpdateEditorSummary()
     f:Show()
     self:MarkWindowShown(f)
-    self:Query(f.target)
+    self:Query(f.target, false, true)
 end
 
 function A:CreateReviewsWindow()
     local REVIEWS_WIDTH, REVIEWS_HEIGHT = 650, 550
     local f = makeFrame("RateMeReviewsWindow", REVIEWS_WIDTH, REVIEWS_HEIGHT, "Rate Me! — Community Reviews")
     makeResizable(f, REVIEWS_WIDTH, 400, 1200, 1000)
-    f.targetText = label(f, "GameFontHighlight", "", 26, -48, 570)
-    f.ratingText = label(f, "GameFontNormal", "", 26, -74, 572)
-    f.status = label(f, "GameFontDisableSmall", "", 26, -98, 572)
+    -- Player name sits beside the portrait, like the Character window's level line.
+    f.targetText = label(f, "GameFontHighlight", "", 66, -34, 530)
+    f.ratingText = label(f, "GameFontNormal", "", 26, -70, 572)
+    f.status = label(f, "GameFontDisableSmall", "", 26, -94, 572)
     f.scroller = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
     f.scroller:SetPoint("TOPLEFT", 26, -138)
     f.scroller:SetPoint("BOTTOMRIGHT", -48, 65)
@@ -1070,7 +1311,7 @@ function A:CreateReviewsWindow()
     end)
     f.rows = {}
     f.refresh = button(f, "Refresh", 130, 26, 28, -508, function()
-        if f.target then A:Query(f.target, true) end
+        if f.target then A:Query(f.target, true, true) end
     end)
     f.refresh:ClearAllPoints()
     f.refresh:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 28, REVIEWS_HEIGHT - 508)
@@ -1086,7 +1327,7 @@ function A:CreateReviewRow(index)
     row:SetPoint("TOPRIGHT", f.content, "TOPRIGHT", -2, y)
     local tex = row:CreateTexture(nil, "BACKGROUND")
     tex:SetAllPoints()
-    tex:SetColorTexture(0.18, 0.20, 0.28, index % 2 == 0 and 0.55 or 0.25)
+    tex:SetColorTexture(0, 0, 0, index % 2 == 0 and 0.45 or 0.2)
     row.nameText = label(row, "GameFontHighlight", "", 8, -8, 310)
     row.scoreText = label(row, "GameFontNormal", "", 362, -8, 180, "RIGHT")
     row.scoreText:ClearAllPoints()
@@ -1195,7 +1436,7 @@ function A:OpenReviews(target)
     local f = self.reviews
     f.target = {guid = target.guid, name = target.name, faction = target.faction, class = target.class}
     self:RememberTarget(f.target)
-    self:Query(f.target)
+    self:Query(f.target, false, true)
     f:Show()
     self:MarkWindowShown(f)
     self:DrawReviews()
@@ -1260,15 +1501,15 @@ local PARTY_ROWS_TOP = -110
 local PARTY_PANEL_BOX_LEFT = 732 - 8
 local PARTY_PANEL_BOX_TOP = -104 + 8
 local PARTY_PANEL_BOX_BOTTOM = -104 - 392 - 8
-local PARTY_ROW_COLOR = {0.18, 0.20, 0.25}
+local PARTY_ROW_COLOR = {0.10, 0.09, 0.08}
 local PARTY_ACTIVE_ROW_COLOR = {0.32, 0.27, 0.12}
-local PARTY_HOVER_ROW_COLOR = {0.25, 0.27, 0.33}
+local PARTY_HOVER_ROW_COLOR = {0.20, 0.18, 0.14}
 
 function A:CreatePartyReviewWindow()
     local f = makeFrame("RateMePartyReviewWindow", 1190, 560, "Rate Me! - Rate Your Party")
     label(f, "GameFontHighlightSmall",
         "Choose stars for each player. Click a player to show their tags in the panel on the right (up to three). Leave a player unrated to skip them.",
-        25, -54, 1130)
+        66, -40, 1090)
     f.status = label(f, "GameFontDisableSmall", "", 25, -79, 690)
 
     -- Sized for exactly four rows; scrolling is only possible (and the bar only

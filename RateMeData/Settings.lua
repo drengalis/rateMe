@@ -6,7 +6,16 @@ A.SETTINGS_SCHEMA_VERSION = 1
 function A:InitializeStorage()
     local db = Store:Open(self.protocol, self:Stamp(), self.MAX_RECENT)
     self.db, self.data = db, db -- two runtime aliases to ONE persisted table
-    local settings = db.settings
+    self:ApplyDefaultSettings()
+    if type(db.authored[self:Key(self.myName)]) ~= "table" then
+        db.authored[self:Key(self.myName)] = {}
+    end
+    self:RestoreCommunityLookups()
+end
+
+-- Fill in every missing or invalid setting with its default value.
+function A:ApplyDefaultSettings()
+    local settings = self.db.settings
     if type(settings.receiveRatingBroadcasts) ~= "boolean" then settings.receiveRatingBroadcasts = true end
     if type(settings.sendRatingBroadcasts) ~= "boolean" then settings.sendRatingBroadcasts = true end
     local peers = tonumber(settings.lookupPeerCount)
@@ -29,6 +38,8 @@ function A:InitializeStorage()
     -- Glow defaults on within its opt-in parent; numeric nameplate badge defaults off.
     if type(settings.ratingHighlightsGlow) ~= "boolean" then settings.ratingHighlightsGlow = true end
     if type(settings.ratingHighlightsBadge) ~= "boolean" then settings.ratingHighlightsBadge = false end
+    -- Ask before removing one of my ratings.
+    if type(settings.confirmRemoveRating) ~= "boolean" then settings.confirmRemoveRating = true end
     -- Show a multi-player rating form after leaving a non-raid party.
     if type(settings.partyReviewPrompt) ~= "boolean" then settings.partyReviewPrompt = true end
     -- Source preferences are independent for alerts and visual highlights.
@@ -56,10 +67,16 @@ function A:InitializeStorage()
     end
     settings.lowRatingThreshold = math.max(1, math.min(5,
         math.floor(settings.lowRatingThreshold * 2 + 0.5) / 2))
-    if type(db.authored[self:Key(self.myName)]) ~= "table" then
-        db.authored[self:Key(self.myName)] = {}
-    end
-    self:RestoreCommunityLookups()
+end
+
+-- Settings > Reset to Default: every setting and every remembered window
+-- position/size goes back to its default. Ratings and reviews are untouched.
+function A:ResetSettingsToDefault()
+    if not self.db then return false end
+    for key in pairs(self.db.settings) do self.db.settings[key] = nil end
+    self.db.windows = {}
+    self:ApplyDefaultSettings()
+    return true
 end
 
 

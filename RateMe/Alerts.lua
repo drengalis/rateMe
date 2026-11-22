@@ -97,7 +97,7 @@ function A:ProcessGroupLookups()
             if summary and summary.fresh then
                 self.groupPending[guid] = nil
                 self:WarnForLowRating(target)
-            elseif self:Query(target) then
+            elseif self:RequestLookup(target, 1) then
                 self.groupPending[guid] = nil
                 return
             end

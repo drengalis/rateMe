@@ -71,7 +71,28 @@ end
 -- Return an authenticated, fresh community sample only. Cached historical
 -- summaries are for display, not for current alerts or colour effects.
 
+-- The runtime community cache keeps a copy of the player's own vote (added by
+-- Query). Keep it in step with the saved rating, or a removed/changed rating
+-- keeps counting towards the "fresh" community score until the cache expires
+-- (which left nameplate highlights and badges showing after a removal).
+function A:SyncOwnCachedVote(guid)
+    local cache = self.runtime and self.runtime.cache and self.runtime.cache[guid]
+    if not cache or not cache.votes or not self.myName then return end
+    local key = self:Key(self.myName)
+    local own = self:GetOwnRating(guid)
+    if own and not own.removed and own.faction == self.myFaction
+        and type(own.score) == "number" and own.score >= 1 and own.score <= 5 then
+        cache.votes[key] = {
+            sender = self.myName, score = own.score, date = own.date,
+            rev = own.rev, tags = own.tags, freshAt = self:Now(),
+        }
+    else
+        cache.votes[key] = nil
+    end
+end
+
 function A:OnPersonalRatingChanged(guid)
+    self:SyncOwnCachedVote(guid)
     if self.RefreshHighlights then self:RefreshHighlights() end
     if self.groupMembers and self.groupMembers[guid] and self.WarnForLowRating then
         self:WarnForLowRating(self.groupMembers[guid])

@@ -47,7 +47,7 @@ function A:AddTooltip(tooltip)
     if mine and not mine.removed then
         tooltip:AddDoubleLine("Your rating", self:StarMarkup(mine.score, 13), 0.91, 0.91, 0.87, 1, 0.78, 0.30)
     end
-    self:Query(target)
+    self:RequestLookup(target, 1)
 end
 
 local MENU_TAGS = {

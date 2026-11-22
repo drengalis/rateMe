@@ -51,7 +51,7 @@ function Store:Open(protocol, now, recentLimit)
         error("RateMeData: unsupported settings schema; refusing to modify RateMeDB")
     end
     db.schema, db.settingsSchema = self.SCHEMA_VERSION, 1
-    for _, key in ipairs({"authored", "settings", "ignored", "recent", "peers", "community"}) do
+    for _, key in ipairs({"authored", "settings", "ignored", "recent", "peers", "community", "windows"}) do
         if type(db[key]) ~= "table" then db[key] = {} end
     end
     if db.peerProtocol ~= protocol then

@@ -17,6 +17,7 @@ local registry = {
     [10]={name="Knows Mechanics",positive=true},
     [11]={name="Protects Teammates",positive=true},
     [12]={name="Good Sportsmanship",positive=true},
+    [13]={name="Shares Resources",positive=true},
     [33]={name="Ninja Looter",positive=false},
     [34]={name="Toxic",positive=false},
     [35]={name="Griefer",positive=false},
@@ -29,9 +30,10 @@ local registry = {
     [42]={name="Poor Communication",positive=false},
     [43]={name="Breaks Crowd Control",positive=false},
     [44]={name="Disrespects Loot Rules",positive=false},
+    [45]={name="Resource Hog",positive=false},
 }
 local opposite = {[2]={[38]=true},[7]={[33]=true,[44]=true},[8]={[42]=true},
-    [9]={[41]=true},[10]={[39]=true},[12]={[34]=true,[35]=true}}
+    [9]={[41]=true},[10]={[39]=true},[12]={[34]=true,[35]=true},[13]={[45]=true}}
 -- One safe ASCII byte per ID. Preserve this alphabet and ID-to-byte mapping.
 local alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 A.TAG_REGISTRY = registry
@@ -86,4 +88,47 @@ function A:ReviewTagsText(value)
     local parts={}
     for _,id in ipairs(self:ReviewTagIds(value) or {}) do parts[#parts+1]=self:ReviewTagText(id) end
     return #parts>0 and table.concat(parts,"  ") or "No tags"
+end
+
+-- Count current reviews in local data, once per original author and target.
+-- Authored records take precedence over cached copies, including tombstones.
+-- Counts are derived on window open; no extra SavedVariables index is stored.
+function A:TagUsageCounts()
+    local counts,seen={},{}
+    local function add(author,guid,review)
+        seen[author]=seen[author] or {}
+        if seen[author][guid] then return end
+        seen[author][guid]=true
+        if type(review)~="table" or review.removed or type(review.score)~="number" or review.score<=0 then return end
+        for _,id in ipairs(self:ReviewTagIds(review.tags) or {}) do
+            counts[id]=(counts[id] or 0)+1
+        end
+    end
+    local db=self.db or {}
+    for author,records in pairs(db.authored or {}) do
+        for guid,review in pairs(records) do add(author,guid,review) end
+    end
+    for guid,target in pairs(db.community or {}) do
+        for author,review in pairs(target.votes or {}) do add(author,guid,review) end
+    end
+    return counts
+end
+
+function A:SortedReviewTagGroups(counts)
+    counts=counts or self:TagUsageCounts()
+    local groups={positive={},negative={}}
+    for id,tag in pairs(registry) do
+        if not tag.retired then
+            local group=tag.positive and groups.positive or groups.negative
+            group[#group+1]=id
+        end
+    end
+    local function commonFirst(a,b)
+        local ca,cb=counts[a] or 0,counts[b] or 0
+        if ca~=cb then return ca>cb end
+        return registry[a].name<registry[b].name
+    end
+    table.sort(groups.positive,commonFirst)
+    table.sort(groups.negative,commonFirst)
+    return groups
 end
