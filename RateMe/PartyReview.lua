@@ -15,12 +15,23 @@ local function partyState()
     return 'solo'
 end
 
+-- Guild members are never offered for post-party rating.
+local function isGuildmate(unit)
+    if not UnitIsInMyGuild then return false end
+    local ok, inGuild = pcall(UnitIsInMyGuild, unit)
+    return ok and inGuild and true or false
+end
+
 function A:CapturePartyMembers()
     if partyState() ~= 'party' then return end
     self.partySession = self.partySession or {}
     for i = 1, 4 do
-        local target = self:CaptureUnit('party' .. i)
-        if target and not self.partySession[target.guid] then
+        local unit = 'party' .. i
+        local target = self:CaptureUnit(unit)
+        if target and isGuildmate(unit) then
+            -- Also drops anyone captured before guild information was available.
+            self.partySession[target.guid] = nil
+        elseif target and not self.partySession[target.guid] then
             local count = 0
             for _ in pairs(self.partySession) do count = count + 1 end
             if count < MAX_ENCOUNTERED then

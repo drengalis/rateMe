@@ -8,7 +8,7 @@ Copy all three folders into Interface/AddOns: **RateMe**, **RateMeData**, and **
 
 ## Reviews and tags
 
-Written comments have been removed. In the rating editor, click **Add Tag** to open separate Positive and Negative lists. Select up to three tags TOTAL, mixing either type. Selected tags appear beneath your rating with an X to remove each. Positive labels use a green + prefix; negative labels use a red - prefix. Direct opposites are mutually exclusive. The post-party rating editor uses the same selector. Community Reviews shows each author's tags and a Hide tags/Show tags control for that reviewer.
+Written comments have been removed. The rating editor always shows compact Positive and Negative lists beside the rating controls in the same window. Each list is sorted by frequency across locally stored authored and received reviews, most common first, with alphabetical ties. Duplicate copies of the same author/target review count once; removed reviews are excluded. Ordering refreshes when the editor opens and stays stable while selecting. Select up to three tags TOTAL, mixing either type. Selected tags appear on one line beneath your rating, each occupying a fixed one-third slot across the window with a red X aligned at its right edge to remove it. One or two tags occupy one-third or two-thirds of the row; three fill it. Positive labels use a green + prefix; negative labels use a red - prefix. Direct opposites are mutually exclusive. The post-party rating editor uses the same selector. Community Reviews shows each author's tags and a Hide tags/Show tags control for that reviewer.
 
 ### Permanent IDs
 
@@ -28,6 +28,7 @@ The authoritative registry is RateMeData/Tags.lua. IDs MUST NEVER be renumbered,
 | 10 | +Knows Mechanics | 42 | -Poor Communication |
 | 11 | +Protects Teammates | 43 | -Breaks Crowd Control |
 | 12 | +Good Sportsmanship | 44 | -Disrespects Loot Rules |
+| 13 | +Shares Resources | 45 | -Resource Hog |
 
 ## Storage and verification
 

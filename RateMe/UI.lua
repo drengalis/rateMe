@@ -14,8 +14,36 @@ local LIST_COLUMNS = {
     date = {x = 418, width = 237},
 }
 
-local function makeFrame(name, width, height)
-    local f = CreateFrame("Frame", name, UIParent, "BackdropTemplate")
+-- Windows use Blizzard's own BasicFrameTemplate, the same chrome as the
+-- built-in game windows: a titlebar with the window title, the standard X
+-- close button (f.CloseButton, which hides the window) and matching borders.
+-- If a client ever lacks the template, fall back to the previous dialog look.
+local function makeFrame(name, width, height, title)
+    local ok, f = pcall(CreateFrame, "Frame", name, UIParent, "BasicFrameTemplate")
+    if not ok or not f or not (f.CloseButton or f.TitleBg or _G[name .. "CloseButton"]) then
+        if ok and f then f:Hide() end
+        f = CreateFrame("Frame", name, UIParent, "BackdropTemplate")
+        f:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            tile = false, edgeSize = 28,
+            insets = {left = 8, right = 8, top = 8, bottom = 8},
+        })
+        f:SetBackdropColor(0.055, 0.065, 0.09, 1)
+        local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", -5, -5)
+        f.CloseButton = close
+    end
+    f.CloseButton = f.CloseButton or _G[name .. "CloseButton"]
+    if f.CloseButton then
+        f.CloseButton:SetScript("OnClick", function() f:Hide() end)
+    end
+    f.TitleText = f.TitleText or _G[name .. "TitleText"]
+    if not f.TitleText then
+        f.TitleText = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        f.TitleText:SetPoint("TOP", f, "TOP", 0, -6)
+    end
+    f.TitleText:SetText(title or A.title or "Rate Me!")
     f:SetSize(width, height)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
@@ -25,18 +53,12 @@ local function makeFrame(name, width, height)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", function(self) self:StartMoving() end)
     f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
-    -- The opaque full-frame texture also covers the border insets; the default
-    -- Blizzard dialog background texture has transparent areas.
+    -- Opaque layer beneath the template's (partly transparent) background so
+    -- the game world never shows through the window contents.
     local background = f:CreateTexture(nil, "BACKGROUND", nil, -8)
-    background:SetAllPoints(f)
+    background:SetPoint("TOPLEFT", f, "TOPLEFT", 2, -2)
+    background:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -2, 2)
     background:SetColorTexture(0.055, 0.065, 0.09, 1)
-    f:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = false, edgeSize = 28,
-        insets = {left = 8, right = 8, top = 8, bottom = 8},
-    })
-    f:SetBackdropColor(0.055, 0.065, 0.09, 1)
     f:SetAlpha(1)
     -- WoW closes named frames registered here when Escape is pressed.
     if UISpecialFrames then
@@ -51,14 +73,35 @@ local function makeFrame(name, width, height)
         if A.ArrangeWindows then A:ArrangeWindows() end
     end)
     f:SetScript("OnHide", function(self)
-        if A.tagPicker and A.tagPicker.owner and A.tagPicker.owner.window == self then A.tagPicker:Hide() end
         if A.ArrangeWindows then A:ArrangeWindows() end
     end)
     f:Hide()
-    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", -5, -5)
-    close:SetScript("OnClick", function() f:Hide() end)
     return f
+end
+
+-- Bottom-right drag grip, the same one the chat windows use. The design size
+-- is the minimum, because list columns and controls are laid out for it.
+local function makeResizable(f, minWidth, minHeight, maxWidth, maxHeight)
+    f:SetResizable(true)
+    if f.SetResizeBounds then
+        f:SetResizeBounds(minWidth, minHeight, maxWidth, maxHeight)
+    else
+        if f.SetMinResize then f:SetMinResize(minWidth, minHeight) end
+        if f.SetMaxResize then f:SetMaxResize(maxWidth, maxHeight) end
+    end
+    local grip = CreateFrame("Button", nil, f)
+    grip:SetSize(16, 16)
+    grip:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -4, 4)
+    grip:SetFrameLevel(f:GetFrameLevel() + 10)
+    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    grip:SetScript("OnMouseDown", function(_, mouseButton)
+        if mouseButton == "LeftButton" then f:StartSizing("BOTTOMRIGHT") end
+    end)
+    grip:SetScript("OnMouseUp", function() f:StopMovingOrSizing() end)
+    f.resizeGrip = grip
+    return grip
 end
 
 -- Tile the visible windows into one horizontal row, centred on the screen.
@@ -68,7 +111,7 @@ function A:ArrangeWindows()
     if not UIParent or not UIParent.GetWidth or not UIParent.GetHeight then return end
     local frames = {}
     local totalWidth, maxHeight = 0, 0
-    for _, windowName in ipairs({"main", "editor", "reviews", "partyReview", "tagPicker"}) do
+    for _, windowName in ipairs({"main", "editor", "reviews", "partyReview"}) do
         local frame = self[windowName]
         if frame and frame:IsShown() then
             frames[#frames + 1] = frame
@@ -107,7 +150,7 @@ end
 -- Rate Me! window instead of merely clearing focus.
 function A:CloseTopWindow()
     local newest, newestOrder
-    for _, windowName in ipairs({"main", "editor", "reviews", "partyReview", "tagPicker"}) do
+    for _, windowName in ipairs({"main", "editor", "reviews", "partyReview"}) do
         local frame = self[windowName]
         if frame and frame:IsShown() then
             local order = frame.rateMeShowOrder or 0
@@ -191,24 +234,31 @@ local function sortItems(items, recent)
 end
 
 function A:CreateMainWindow()
-    local f = makeFrame("RateMeMainWindow", 770, 565)
-    -- Keep the title and navigation in one header row. The close button
-    -- occupies the far right, so the three tabs end before its hit area.
-    -- Both text fields use the same left edge AND LEFT justification. The
-    -- default centred justification on different widths shifted the tagline.
-    f.title = label(f, "GameFontNormalLarge", "Rate Me!", 26, -24, 160, "LEFT")
-    f.tagline = label(f, "GameFontDisableSmall", "Reputation earned. Reputation shared.", 26, -51, 325, "LEFT")
+    local MAIN_WIDTH, MAIN_HEIGHT = 770, 565
+    local f = makeFrame("RateMeMainWindow", MAIN_WIDTH, MAIN_HEIGHT, "Rate Me!")
+    makeResizable(f, MAIN_WIDTH, 420, 1400, 1000)
+    -- The window title lives in the Blizzard titlebar. Below it, one header
+    -- row holds the tagline (left) and the navigation tabs (right-aligned, so
+    -- they stay at the right edge when the window is resized).
+    f.tagline = label(f, "GameFontDisableSmall", "Reputation earned. Reputation shared.", 26, -48, 325, "LEFT")
     f.tab = "mine"
     f.pages = {mine = 1, recent = 1}
-    f.tabMine = button(f, "My Ratings", 107, 27, 370, -19, function()
+    f.tabMine = button(f, "My Ratings", 107, 27, 370, -38, function()
         f.tab = "mine"; f.selected = nil; A:DrawMain()
     end)
-    f.tabRecent = button(f, "Recent Lookups", 132, 27, 482, -19, function()
+    f.tabRecent = button(f, "Recent Lookups", 132, 27, 482, -38, function()
         f.tab = "recent"; f.selected = nil; A:DrawMain()
     end)
-    f.tabSettings = button(f, "Settings", 98, 27, 619, -19, function()
+    f.tabSettings = button(f, "Settings", 98, 27, 619, -38, function()
         f.tab = "settings"; f.selected = nil; A:DrawMain()
     end)
+    f.tabSettings:ClearAllPoints()
+    -- The X now sits in the titlebar, so the tabs line up with the dividers.
+    f.tabSettings:SetPoint("TOPRIGHT", f, "TOPRIGHT", -29, -38)
+    f.tabRecent:ClearAllPoints()
+    f.tabRecent:SetPoint("TOPRIGHT", f.tabSettings, "TOPLEFT", -5, 0)
+    f.tabMine:ClearAllPoints()
+    f.tabMine:SetPoint("TOPRIGHT", f.tabRecent, "TOPLEFT", -5, 0)
     -- Keep the title/navigation, list, and pagination/search visually distinct
     -- without adding extra headers or taking space away from the scroll area.
     -- Plain colour textures are supported by Forever's client and scale with
@@ -232,18 +282,25 @@ function A:CreateMainWindow()
     -- controls, then use the darker footer only for Search and Clear.
     f.footerBackground = f:CreateTexture(nil, "BACKGROUND", nil, -7)
     f.footerBackground:SetColorTexture(0.038, 0.045, 0.065, 1)
-    f.footerBackground:SetPoint("TOPLEFT", f, "TOPLEFT", 25, -506)
+    -- Footer and pager are anchored to the bottom edge so they follow resizing.
+    -- Offsets are the original top-based positions converted for MAIN_HEIGHT.
+    f.footerBackground:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 25, MAIN_HEIGHT - 506)
     f.footerBackground:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -25, 12)
     f.footerDivider = divider(-506)
+    f.footerDivider:ClearAllPoints()
+    f.footerDivider:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 29, MAIN_HEIGHT - 506)
+    f.footerDivider:SetPoint("TOPRIGHT", f, "BOTTOMRIGHT", -29, MAIN_HEIGHT - 506)
     -- Search is the only footer control. All Characters lives in Settings,
     -- and lookup refresh remains in the selected player's drilldown window.
     -- Player counts sit right-aligned on the same row as the pager instead of
     -- floating in the blank space above the column headings.
     f.status = label(f, "GameFontDisableSmall", "", 588, -477, 153, "RIGHT")
+    f.status:ClearAllPoints()
+    f.status:SetPoint("TOPRIGHT", f, "BOTTOMRIGHT", -29, MAIN_HEIGHT - 477)
     f.searchLabel = label(f, "GameFontNormalSmall", "Search:", 29, -526)
     f.search = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
     f.search:SetSize(400, 23)
-    f.search:SetPoint("TOPLEFT", 72, -520)
+    f.search:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 72, MAIN_HEIGHT - 520)
     -- InputBoxTemplate draws a frame *outside* the EditBox bounds. Position
     -- the label against the visible border, not against its hidden frame edge.
     -- Vertical adjustments account for the small-font glyph's visible centre.
@@ -307,6 +364,11 @@ function A:CreateMainWindow()
         A:DrawMain()
     end)
     f.pageIndicator = label(f, "GameFontHighlightSmall", "Page 1 of 1", 349, -477, 123, "CENTER")
+    -- Keep the pager group together, centred where it was relative to the window.
+    f.pageIndicator:ClearAllPoints()
+    f.pageIndicator:SetPoint("TOP", f, "BOTTOM", 349 + 123 / 2 - MAIN_WIDTH / 2, MAIN_HEIGHT - 477)
+    f.previousPage:ClearAllPoints()
+    f.previousPage:SetPoint("TOPRIGHT", f.pageIndicator, "TOPLEFT", -10, 6)
     f.nextPage = button(f, "Next", 95, 24, 484, -471, function()
         if f.tab ~= "mine" and f.tab ~= "recent" then return end
         local page = f.pages[f.tab] or 1
@@ -315,6 +377,8 @@ function A:CreateMainWindow()
         f.selected = nil
         A:DrawMain()
     end)
+    f.nextPage:ClearAllPoints()
+    f.nextPage:SetPoint("TOPLEFT", f.pageIndicator, "TOPRIGHT", 12, 6)
     f:SetScript("OnShow", function()
         A:MarkWindowShown(f)
         A:DrawMain()
@@ -733,96 +797,158 @@ function A:DrawMain()
 end
 
 -- Shared tag selection for the individual editor and post-party editor.
-function A:CreateTagSelection(parent, window, x, y, width, changed)
+function A:CreateTagSelection(parent, window, x, y, width, changed, sidebar)
     local c=CreateFrame("Frame",nil,parent)
-    c:SetSize(width,110)
+    local compact=sidebar and sidebar.compact
+    c:SetSize(width,compact and 30 or (sidebar and 60 or 410))
     c:SetPoint("TOPLEFT",parent,"TOPLEFT",x,y)
-    c.tags,c.window,c.changed={},window,changed
-    c.add=button(c,"Add Tag",100,24,0,0,function() A:OpenTagPicker(c) end)
+    c.tags,c.window,c.changed,c.tagWidth={},window,changed,width
+    -- Optional: called when a chip is clicked (party rows select themselves).
+    c.activate=sidebar and sidebar.activate
+    -- Compact controls show only the chosen chips; the heading and count live
+    -- beside the separate choices panel instead.
+    c.chipY=compact and 0 or -29
+    if not compact then label(c,"GameFontDisableSmall","Choose up to three tags",0,-6,width-110) end
     c.count=label(c,"GameFontDisableSmall","0 / 3 tags",width-110,-6,110,"RIGHT")
+    if compact then
+        c.count:Hide()
+        c.empty=label(c,"GameFontDisableSmall","No tags",4,-9,width-8)
+    end
     c.chips={}
     for n=1,3 do
         local slot=n
-        local chip=button(c,"",width,23,0,-(29+(n-1)*25),function()
+        local chip=CreateFrame("Frame",nil,c,"BackdropTemplate")
+        chip:SetSize(1,30)
+        chip:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",
+            edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",edgeSize=8,
+            insets={left=3,right=3,top=3,bottom=3}})
+        chip:SetBackdropColor(0.07,0.08,0.11,1)
+        chip:SetBackdropBorderColor(0.38,0.42,0.48,1)
+        chip.caption=label(chip,"GameFontHighlight","",8,0)
+        chip.caption:ClearAllPoints()
+        chip.caption:SetPoint("LEFT",chip,"LEFT",8,0)
+        chip.caption:SetHeight(22)
+        chip.caption:SetJustifyH("LEFT")
+        if chip.caption.SetWordWrap then chip.caption:SetWordWrap(false) end
+        chip.remove=CreateFrame("Button",nil,chip)
+        chip.remove:SetSize(20,24)
+        chip.remove:SetPoint("RIGHT",chip,"RIGHT",-4,0)
+        chip.remove.caption=label(chip.remove,"GameFontNormal","X",0,0)
+        chip.remove.caption:SetAllPoints(chip.remove)
+        chip.remove.caption:SetJustifyH("CENTER")
+        if chip.remove.caption.SetJustifyV then chip.remove.caption:SetJustifyV("MIDDLE") end
+        chip.remove.caption:SetTextColor(1,0.2,0.2)
+        chip.remove:SetScript("OnClick",function()
+            if c.activate then c.activate() end
             table.remove(c.tags,slot)
             A:RefreshTagSelection(c)
             if c.changed then c.changed() end
-            A:DrawTagPicker()
         end)
-        chip.caption=label(chip,"GameFontHighlightSmall","",8,-5,width-16)
+        local function tooltip(owner)
+            local id=c.tags[slot]
+            if not id then return end
+            GameTooltip:SetOwner(owner,"ANCHOR_TOP")
+            GameTooltip:AddLine(A:ReviewTagText(id),1,1,1)
+            GameTooltip:AddLine("Click the red X to remove this tag.",0.8,0.8,0.8)
+            GameTooltip:Show()
+        end
+        chip:EnableMouse(true)
+        chip:SetScript("OnMouseDown",function() if c.activate then c.activate() end end)
+        chip:SetScript("OnEnter",tooltip)
+        chip:SetScript("OnLeave",function() GameTooltip:Hide() end)
+        chip.remove:SetScript("OnEnter",tooltip)
+        chip.remove:SetScript("OnLeave",function() GameTooltip:Hide() end)
         c.chips[n]=chip
         chip:Hide()
     end
+    c.buttons={}
+    local host=sidebar and (sidebar.parent or parent) or c
+    c.choices=CreateFrame("Frame",nil,host)
+    c.choices:SetSize(sidebar and sidebar.width or width,344)
+    c.choices:SetPoint("TOPLEFT",host,"TOPLEFT",sidebar and sidebar.x or 0,sidebar and sidebar.y or -66)
+    local columnWidth=math.min(230,((sidebar and sidebar.width or width)-12)/2)
+    c.columnWidth=columnWidth
+    local negativeX=columnWidth+12
+    label(c.choices,"GameFontNormal","Positive",0,0,columnWidth):SetTextColor(0.35,1,0.45)
+    label(c.choices,"GameFontNormal","Negative",negativeX,0,columnWidth):SetTextColor(1,0.35,0.35)
+    for id,tag in pairs(self.TAG_REGISTRY) do
+        if not tag.retired then
+            local tagId=id
+            local b=button(c.choices,"",columnWidth,23,0,0,function() A:ToggleSelectionTag(c,tagId) end)
+            b.caption=label(b,"GameFontHighlightSmall","",8,-5,columnWidth-28)
+            if b.caption.SetWordWrap then b.caption:SetWordWrap(false) end
+            b.selected=label(b,"GameFontHighlightSmall","",columnWidth-18,-5,12)
+            c.buttons[id]=b
+        end
+    end
+    self:SortTagSelection(c,{})
     return c
 end
 
-function A:SetTagSelection(control, value)
+function A:SetTagSelection(control, value, counts)
     control.tags=self:ReviewTagIds(value) or {}
+    self:SortTagSelection(control,counts or self:TagUsageCounts())
     self:RefreshTagSelection(control)
-    if self.tagPicker and self.tagPicker.owner==control then self:DrawTagPicker() end
 end
 
 function A:RefreshTagSelection(control)
-    control.count:SetText(tostring(#control.tags).." / 3 tags")
-    control.add:SetEnabled(#control.tags<3)
+    local count=#control.tags
+    control.count:SetText(tostring(count).." / 3 tags")
+    -- Reserve three equal slots even when only one or two tags are selected.
+    -- Fixed-size captions avoid shrinking short labels and keep every X aligned.
+    local gap,padding=6,36
+    local slotWidth=(control.tagWidth-2*gap)/3
     for n,chip in ipairs(control.chips) do
         local id=control.tags[n]
-        if id then chip.caption:SetText(self:ReviewTagText(id).."   |cffaaaaaaX|r");chip:Show()
+        if id then
+            local left=math.floor((n-1)*(slotWidth+gap))
+            local right=math.floor(n*slotWidth+(n-1)*gap)
+            local width=right-left
+            chip:SetWidth(width)
+            chip:ClearAllPoints()
+            chip:SetPoint("TOPLEFT",control,"TOPLEFT",left,control.chipY or -29)
+            chip.caption:SetText(self:ReviewTagText(id))
+            chip.caption:SetWidth(math.max(1,width-padding))
+            chip:Show()
         else chip:Hide() end
     end
-end
-
-function A:OpenTagPicker(control)
-    if not self.tagPicker then
-        local f=makeFrame("RateMeTagPicker",690,460)
-        label(f,"GameFontNormalLarge","Add Tag",25,-25)
-        label(f,"GameFontHighlightSmall","Choose up to three tags total. Click a selected tag to remove it.",25,-54,630)
-        label(f,"GameFontNormal","Positive",25,-85,300):SetTextColor(0.35,1,0.45)
-        label(f,"GameFontNormal","Negative",350,-85,310):SetTextColor(1,0.35,0.35)
-        f.buttons={}
-        local counts={positive=0,negative=0}
-        for id=1,63 do
-            local tag=self.TAG_REGISTRY[id]
-            if tag and not tag.retired then
-                local group=tag.positive and "positive" or "negative"
-                local x=tag.positive and 25 or 350
-                local y=-(111+counts[group]*25)
-                counts[group]=counts[group]+1
-                local tagId=id
-                local b=button(f,"",310,23,x,y,function() A:TogglePickerTag(tagId) end)
-                b.caption=label(b,"GameFontHighlightSmall","",8,-5,296)
-                f.buttons[id]=b
-            end
-        end
-        f.count=label(f,"GameFontDisableSmall","",25,-421,420)
-        button(f,"Done",110,25,550,-419,function() f:Hide() end)
-        self.tagPicker=f
+    if control.empty then
+        if count==0 then control.empty:Show() else control.empty:Hide() end
     end
-    self.tagPicker.owner=control
-    self:DrawTagPicker()
-    self.tagPicker:Show()
-    self:MarkWindowShown(self.tagPicker)
+    self:DrawTagSelection(control)
 end
 
-function A:DrawTagPicker()
-    local f=self.tagPicker
-    if not f or not f.owner then return end
-    local tags=f.owner.tags
-    for id,b in pairs(f.buttons) do
+-- Freeze the frequency order while editing so choices do not jump under the cursor.
+function A:SortTagSelection(control, counts)
+    local groups=self:SortedReviewTagGroups(counts)
+    control.tagGroups=groups
+    for _,group in ipairs({"positive","negative"}) do
+        local x=group=="positive" and 0 or control.columnWidth+12
+        for row,id in ipairs(groups[group]) do
+            local b=control.buttons[id]
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT",control.choices,"TOPLEFT",x,-(23+(row-1)*24))
+        end
+    end
+end
+
+function A:DrawTagSelection(control)
+    local tags=control.tags
+    for id,b in pairs(control.buttons) do
         local selected=false
-        for _,chosen in ipairs(tags) do if chosen==id then selected=true end end
         local candidate={}
-        for _,chosen in ipairs(tags) do candidate[#candidate+1]=chosen end
+        for _,chosen in ipairs(tags) do
+            if chosen==id then selected=true end
+            candidate[#candidate+1]=chosen
+        end
         candidate[#candidate+1]=id
         b:SetEnabled(selected or self:EncodeReviewTags(candidate)~=nil)
-        b.caption:SetText(self:ReviewTagText(id)..(selected and "  |cffffffff[selected]|r" or ""))
+        b.caption:SetText(self:ReviewTagText(id))
+        b.selected:SetText(selected and "*" or "")
     end
-    f.count:SetText(tostring(#tags).." / 3 tags selected")
 end
 
-function A:TogglePickerTag(id)
-    local control=self.tagPicker and self.tagPicker.owner
-    if not control then return end
+function A:ToggleSelectionTag(control,id)
     local candidate={}
     local found=false
     for _,chosen in ipairs(control.tags) do
@@ -834,21 +960,19 @@ function A:TogglePickerTag(id)
     control.tags=valid
     self:RefreshTagSelection(control)
     if control.changed then control.changed() end
-    self:DrawTagPicker()
 end
 
 function A:CreateEditorWindow()
-    local f = makeFrame("RateMeEditorWindow", 510, 520)
-    label(f, "GameFontNormalLarge", "Rate Me!", 27, -26)
-    f.targetText = label(f, "GameFontHighlight", "", 28, -67, 450)
-    label(f, "GameFontNormal", "Community rating", 28, -110)
-    f.community = label(f, "GameFontHighlight", "", 28, -134, 452)
-    f.freshness = label(f, "GameFontDisableSmall", "", 28, -158, 452)
-    label(f, "GameFontNormal", "Your rating", 28, -207)
+    local f = makeFrame("RateMeEditorWindow", 960, 530, "Rate Me!")
+    f.targetText = label(f, "GameFontHighlight", "", 28, -58, 450)
+    label(f, "GameFontNormal", "Community rating", 28, -89)
+    f.community = label(f, "GameFontHighlight", "", 28, -111, 452)
+    f.freshness = label(f, "GameFontDisableSmall", "", 28, -132, 452)
+    label(f, "GameFontNormal", "Your rating", 28, -161)
     f.stars = {}
     f.score = 0
     for n = 1, 5 do
-        local b = button(f, "", 65, 43, 28 + (n - 1) * 75, -232, function()
+        local b = button(f, "", 65, 43, 28 + (n - 1) * 75, -183, function()
             f.score = n
             A:UpdateEditorStars()
         end)
@@ -860,11 +984,11 @@ function A:CreateEditorWindow()
         f.stars[n] = b
     end
     -- Personal rating uses interactive star textures, plus a numeric score beside them.
-    f.selectedNumeric = label(f, "GameFontHighlight", "", 405, -243, 74)
-    f.scoreText = label(f, "GameFontHighlightSmall", "", 28, -285, 430)
-    label(f, "GameFontNormal", "Your tags (optional)", 28, -312)
-    f.tagControl = self:CreateTagSelection(f, f, 28, -336, 432)
-    f.save = button(f, "Save Rating", 125, 26, 28, -463, function()
+    f.selectedNumeric = label(f, "GameFontHighlight", "", 405, -194, 74)
+    f.scoreText = label(f, "GameFontHighlightSmall", "", 28, -232, 430)
+    label(f, "GameFontNormal", "Your tags (optional)", 28, -395)
+    f.tagControl = self:CreateTagSelection(f, f, 28, -417, 904, nil, {x=496,y=-70,width=432})
+    f.save = button(f, "Save Rating", 125, 26, 28, -486, function()
         local ok, err = A:SaveOwnRating(f.target, f.score, f.tagControl.tags)
         if ok then
             f:Hide()
@@ -873,14 +997,13 @@ function A:CreateEditorWindow()
             A:Log(err or "Unable to save rating")
         end
     end)
-    f.remove = button(f, "Remove", 86, 26, 158, -463, function()
+    f.remove = button(f, "Remove", 86, 26, 158, -486, function()
         if A:DeleteOwnRating(f.target) then
             A:Log("Removed your rating for " .. A:DisplayName(f.target.name))
             f:Hide()
         end
     end)
-    f.view = button(f, "Reviews", 93, 26, 250, -463, function() A:OpenReviews(f.target) end)
-    button(f, "Cancel", 112, 26, 353, -463, function() f:Hide() end)
+    button(f, "Cancel", 112, 26, 250, -486, function() f:Hide() end)
     self.editor = f
 end
 
@@ -927,24 +1050,30 @@ function A:OpenEditor(target)
 end
 
 function A:CreateReviewsWindow()
-    local f = makeFrame("RateMeReviewsWindow", 650, 550)
-    label(f, "GameFontNormalLarge", "Rate Me! — Community Reviews", 24, -25)
-    f.targetText = label(f, "GameFontHighlight", "", 26, -68, 570)
-    f.ratingText = label(f, "GameFontNormal", "", 26, -94, 572)
-    f.status = label(f, "GameFontDisableSmall", "", 26, -118, 572)
+    local REVIEWS_WIDTH, REVIEWS_HEIGHT = 650, 550
+    local f = makeFrame("RateMeReviewsWindow", REVIEWS_WIDTH, REVIEWS_HEIGHT, "Rate Me! — Community Reviews")
+    makeResizable(f, REVIEWS_WIDTH, 400, 1200, 1000)
+    f.targetText = label(f, "GameFontHighlight", "", 26, -48, 570)
+    f.ratingText = label(f, "GameFontNormal", "", 26, -74, 572)
+    f.status = label(f, "GameFontDisableSmall", "", 26, -98, 572)
     f.scroller = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-    f.scroller:SetPoint("TOPLEFT", 26, -158)
+    f.scroller:SetPoint("TOPLEFT", 26, -138)
     f.scroller:SetPoint("BOTTOMRIGHT", -48, 65)
     f.content = CreateFrame("Frame", nil, f.scroller)
     f.content:SetSize(562, 1)
     f.scroller:SetScrollChild(f.content)
+    -- Review rows stretch with the window; never narrower than the design width.
+    f.scroller:SetScript("OnSizeChanged", function(_, width)
+        if type(width) == "number" and width > 0 then
+            f.content:SetWidth(math.max(562, width - 14))
+        end
+    end)
     f.rows = {}
     f.refresh = button(f, "Refresh", 130, 26, 28, -508, function()
         if f.target then A:Query(f.target, true) end
     end)
-    button(f, "Rate Player", 145, 26, 168, -508, function()
-        if f.target then A:OpenEditor(f.target) end
-    end)
+    f.refresh:ClearAllPoints()
+    f.refresh:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 28, REVIEWS_HEIGHT - 508)
     self.reviews = f
 end
 
@@ -952,13 +1081,16 @@ function A:CreateReviewRow(index)
     local f = self.reviews
     local y = -(index - 1) * 117
     local row = CreateFrame("Frame", nil, f.content)
-    row:SetSize(560, 111)
+    row:SetHeight(111)
     row:SetPoint("TOPLEFT", f.content, "TOPLEFT", 0, y)
+    row:SetPoint("TOPRIGHT", f.content, "TOPRIGHT", -2, y)
     local tex = row:CreateTexture(nil, "BACKGROUND")
     tex:SetAllPoints()
     tex:SetColorTexture(0.18, 0.20, 0.28, index % 2 == 0 and 0.55 or 0.25)
     row.nameText = label(row, "GameFontHighlight", "", 8, -8, 310)
     row.scoreText = label(row, "GameFontNormal", "", 362, -8, 180, "RIGHT")
+    row.scoreText:ClearAllPoints()
+    row.scoreText:SetPoint("TOPRIGHT", row, "TOPRIGHT", -18, -8)
     row.dateText = label(row, "GameFontDisableSmall", "", 8, -30, 300)
     row.verification = CreateFrame("Button", nil, row)
     row.verification:SetSize(220, 18)
@@ -988,14 +1120,18 @@ function A:CreateReviewRow(index)
         GameTooltip:Show()
     end)
     row.verification:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    row.tagsText = label(row, "GameFontHighlightSmall", "", 8, -49, 530)
+    row.tagsText = label(row, "GameFontHighlightSmall", "", 8, -49)
+    row.tagsText:SetPoint("TOPRIGHT", row, "TOPRIGHT", -22, -49)
     row.tagsText:SetJustifyV("TOP")
-    row.tagsText:SetHeight(31)
+    if row.tagsText.SetWordWrap then row.tagsText:SetWordWrap(false) end
+    row.tagsText:SetHeight(18)
     row.block = button(row, "Hide tags", 110, 20, 432, -85, function()
         if not row.reviewer then return end
         A:ToggleReviewerBlock(row.reviewer)
         A:DrawReviews()
     end)
+    row.block:ClearAllPoints()
+    row.block:SetPoint("TOPRIGHT", row, "TOPRIGHT", -18, -85)
     f.rows[index] = row
     return row
 end
@@ -1111,22 +1247,103 @@ end
 
 -- Single batch editor for members of the party that just ended. Never writes
 -- unchanged existing reviews, and never submits unrated rows.
+-- Player rows stay compact so a full party fits without scrolling; tag choices
+-- live in a separate panel on the right, for whichever row is being edited.
+local PARTY_ROW_HEIGHT = 92
+local PARTY_ROW_STEP = 96
+local PARTY_VISIBLE_ROWS = 4
+local PARTY_ROWS_WIDTH = 662
+local PARTY_TAG_PANEL_X = 732
+local PARTY_TAG_PANEL_WIDTH = 432
+local PARTY_ROWS_TOP = -110
+-- The tag panel's outer box (panel frame plus its 8px padding), in window coordinates.
+local PARTY_PANEL_BOX_LEFT = 732 - 8
+local PARTY_PANEL_BOX_TOP = -104 + 8
+local PARTY_PANEL_BOX_BOTTOM = -104 - 392 - 8
+local PARTY_ROW_COLOR = {0.18, 0.20, 0.25}
+local PARTY_ACTIVE_ROW_COLOR = {0.32, 0.27, 0.12}
+local PARTY_HOVER_ROW_COLOR = {0.25, 0.27, 0.33}
+
 function A:CreatePartyReviewWindow()
-    local f = makeFrame("RateMePartyReviewWindow", 748, 568)
-    label(f, "GameFontNormalLarge", "Rate Me! - Rate Your Party", 24, -22)
+    local f = makeFrame("RateMePartyReviewWindow", 1190, 560, "Rate Me! - Rate Your Party")
     label(f, "GameFontHighlightSmall",
-        "Choose stars and optionally add up to three tags. Leave a player unrated to skip them.",
-        25, -54, 680)
+        "Choose stars for each player. Click a player to show their tags in the panel on the right (up to three). Leave a player unrated to skip them.",
+        25, -54, 1130)
     f.status = label(f, "GameFontDisableSmall", "", 25, -79, 690)
-    f.scroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+
+    -- Sized for exactly four rows; scrolling is only possible (and the bar only
+    -- shown) in the rare case of more players being remembered from the party.
+    f.scroll = CreateFrame("ScrollFrame", "RateMePartyReviewScroll", f, "UIPanelScrollFrameTemplate")
     f.scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 25, -110)
-    f.scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -47, 64)
+    f.scroll:SetSize(PARTY_ROWS_WIDTH, PARTY_VISIBLE_ROWS * PARTY_ROW_STEP - (PARTY_ROW_STEP - PARTY_ROW_HEIGHT))
     f.content = CreateFrame("Frame", nil, f.scroll)
-    f.content:SetSize(662, 1)
+    f.content:SetSize(PARTY_ROWS_WIDTH, 1)
     f.scroll:SetScrollChild(f.content)
+    f.scrollBar = f.scroll.ScrollBar or _G["RateMePartyReviewScrollScrollBar"]
     f.rows = {}
 
-    f.save = button(f, "Save Ratings", 155, 27, 390, -522, function()
+    local panel = CreateFrame("Frame", nil, f)
+    panel:SetSize(PARTY_TAG_PANEL_WIDTH, 392)
+    panel:SetPoint("TOPLEFT", f, "TOPLEFT", PARTY_TAG_PANEL_X, -104)
+    -- Same fill and gold outline as the selected row; a bridge (below) joins
+    -- the two into one shape, so the panel reads as "that player's tags".
+    local panelBg = panel:CreateTexture(nil, "BACKGROUND")
+    panelBg:SetPoint("TOPLEFT", panel, "TOPLEFT", -8, 8)
+    panelBg:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 8, -8)
+    panelBg:SetColorTexture(PARTY_ACTIVE_ROW_COLOR[1], PARTY_ACTIVE_ROW_COLOR[2], PARTY_ACTIVE_ROW_COLOR[3], 1)
+    panel.border = {}
+    -- The left edge is drawn by PositionPartyTagBridge, with an opening where
+    -- the bridge from the selected row enters.
+    for _, edge in ipairs({"TOP", "BOTTOM", "RIGHT"}) do
+        local t = panel:CreateTexture(nil, "BORDER")
+        t:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1)
+        if edge == "TOP" or edge == "BOTTOM" then
+            t:SetPoint(edge .. "LEFT", panelBg, edge .. "LEFT", 0, 0)
+            t:SetPoint(edge .. "RIGHT", panelBg, edge .. "RIGHT", 0, 0)
+            t:SetHeight(2)
+        else
+            t:SetPoint("TOP" .. edge, panelBg, "TOP" .. edge, 0, 0)
+            t:SetPoint("BOTTOM" .. edge, panelBg, "BOTTOM" .. edge, 0, 0)
+            t:SetWidth(2)
+        end
+        panel.border[edge] = t
+    end
+    for _, piece in ipairs({"leftAbove", "leftBelow"}) do
+        local t = panel:CreateTexture(nil, "BORDER")
+        t:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1)
+        panel.border[piece] = t
+    end
+    panel.title = label(panel, "GameFontNormal", "Tags", 0, 0, PARTY_TAG_PANEL_WIDTH - 110)
+    panel.count = label(panel, "GameFontDisableSmall", "", PARTY_TAG_PANEL_WIDTH - 110, -2, 110, "RIGHT")
+    panel.hint = label(panel, "GameFontDisableSmall",
+        "Choose up to three tags. Click a selected tag again to remove it.", 0, -22, PARTY_TAG_PANEL_WIDTH)
+    f.tagPanel = panel
+
+    -- Bridge across the gap from the selected row's open right side to the
+    -- opening in the panel's left edge: row + bridge + panel form one outline.
+    local bridge = CreateFrame("Frame", nil, f)
+    bridge.fill = bridge:CreateTexture(nil, "BACKGROUND")
+    bridge.fill:SetAllPoints(bridge)
+    bridge.fill:SetColorTexture(PARTY_ACTIVE_ROW_COLOR[1], PARTY_ACTIVE_ROW_COLOR[2], PARTY_ACTIVE_ROW_COLOR[3], 1)
+    for _, edge in ipairs({"TOP", "BOTTOM"}) do
+        local line = bridge:CreateTexture(nil, "BORDER")
+        line:SetPoint(edge .. "LEFT", bridge, edge .. "LEFT", 0, 0)
+        line:SetPoint(edge .. "RIGHT", bridge, edge .. "RIGHT", 0, 0)
+        line:SetHeight(2)
+        line:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1)
+    end
+    bridge:Hide()
+    f.tagBridge = bridge
+    -- Keep the bridge on its row if the list ever scrolls (more than 4 players).
+    if f.scroll.HookScript then
+        f.scroll:HookScript("OnVerticalScroll", function() A:PositionPartyTagBridge() end)
+    end
+
+    f.save = button(f, "Save Ratings", 155, 27, 860, -514, function()
+        if f.testMode then
+            f.status:SetText("|cffffd100TEST WINDOW|r - nothing is saved or shared.")
+            return
+        end
         local saved, failed, incomplete = 0, 0, 0
         for _, row in ipairs(f.rows) do
             if row:IsShown() and row.target and row.dirty then
@@ -1155,18 +1372,43 @@ function A:CreatePartyReviewWindow()
             A:Log(string.format("Saved %d party rating%s.", saved, saved == 1 and "" or "s"))
         end
     end)
-    button(f, "Not Now", 135, 27, 559, -522, function() f:Hide() end)
+    button(f, "Not Now", 135, 27, 1029, -514, function() f:Hide() end)
     self.partyReview = f
 end
 
 function A:CreatePartyReviewRow(index)
     local f = self.partyReview
     local row = CreateFrame("Frame", nil, f.content)
-    row:SetSize(660, 164)
-    row:SetPoint("TOPLEFT", f.content, "TOPLEFT", 0, -(index - 1) * 168)
-    local background = row:CreateTexture(nil, "BACKGROUND")
-    background:SetAllPoints(row)
-    background:SetColorTexture(0.18, 0.20, 0.25, index % 2 == 0 and 1 or 0.78)
+    row:SetSize(PARTY_ROWS_WIDTH - 2, PARTY_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", f.content, "TOPLEFT", 0, -(index - 1) * PARTY_ROW_STEP)
+    row.index = index
+    row.background = row:CreateTexture(nil, "BACKGROUND")
+    row.background:SetAllPoints(row)
+    row.baseAlpha = index % 2 == 0 and 1 or 0.78
+    -- Gold outline (thick left edge) marks the row whose tags are in the panel.
+    row.activeMark = {}
+    -- No right edge: the selected row opens into the bridge to the tag panel.
+    for _, edge in ipairs({"TOP", "BOTTOM", "LEFT"}) do
+        local t = row:CreateTexture(nil, "ARTWORK")
+        t:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1)
+        if edge == "TOP" or edge == "BOTTOM" then
+            t:SetPoint(edge .. "LEFT", row, edge .. "LEFT", 0, 0)
+            t:SetPoint(edge .. "RIGHT", row, edge .. "RIGHT", 0, 0)
+            t:SetHeight(2)
+        else
+            t:SetPoint("TOP" .. edge, row, "TOP" .. edge, 0, 0)
+            t:SetPoint("BOTTOM" .. edge, row, "BOTTOM" .. edge, 0, 0)
+            t:SetWidth(5)
+        end
+        t:Hide()
+        row.activeMark[#row.activeMark + 1] = t
+    end
+    A:SetPartyRowActive(row, false)
+    -- The whole row is the click target for choosing whose tags are edited.
+    row:EnableMouse(true)
+    row:SetScript("OnMouseDown", function() A:SelectPartyTagRow(row) end)
+    row:SetScript("OnEnter", function() A:SetPartyRowHover(row, true) end)
+    row:SetScript("OnLeave", function() A:SetPartyRowHover(row, false) end)
     row.nameText = label(row, "GameFontHighlight", "", 12, -8, 235)
     row.communityText = label(row, "GameFontDisableSmall", "", 12, -29, 245)
     row.stars = {}
@@ -1184,16 +1426,110 @@ function A:CreatePartyReviewRow(index)
         texture:SetTexture(self.STAR_EMPTY_TEXTURE)
         star.icon = texture
         star:SetScript("OnClick", function()
+            A:SelectPartyTagRow(row)
             row.score = n
             A:UpdatePartyReviewRow(row)
         end)
         row.stars[n] = star
     end
     row.numeric = label(row, "GameFontHighlight", "", 493, -15, 125, "RIGHT")
-    row.tagControl = self:CreateTagSelection(row, f, 12, -52, 630,
-        function() if not row.loading then A:UpdatePartyReviewRow(row) end end)
+    row.tagControl = self:CreateTagSelection(row, f, 12, -52, PARTY_ROWS_WIDTH - 26,
+        function()
+            if row.loading then return end
+            A:UpdatePartyReviewRow(row)
+            A:RefreshPartyTagPanel()
+        end,
+        {parent = f.tagPanel, x = 0, y = -48, width = PARTY_TAG_PANEL_WIDTH, compact = true,
+         activate = function() A:SelectPartyTagRow(row) end})
+    row.tagControl.choices:Hide()
     f.rows[index] = row
     return row
+end
+
+function A:SetPartyRowActive(row, active)
+    local color = active and PARTY_ACTIVE_ROW_COLOR or PARTY_ROW_COLOR
+    row.background:SetColorTexture(color[1], color[2], color[3], active and 1 or row.baseAlpha)
+    for _, edge in ipairs(row.activeMark) do
+        if active then edge:Show() else edge:Hide() end
+    end
+    row.isActive = active
+end
+
+function A:SetPartyRowHover(row, hovered)
+    if row.isActive then return end
+    local color = hovered and PARTY_HOVER_ROW_COLOR or PARTY_ROW_COLOR
+    row.background:SetColorTexture(color[1], color[2], color[3], hovered and 1 or row.baseAlpha)
+end
+
+-- Layout preview with made-up players: /rateme partytest. Saving is disabled.
+function A:OpenPartyReviewTest()
+    local members = {}
+    for n, name in ipairs({"Testadin", "Testlock", "Testpriest", "Testrogue"}) do
+        members[n] = {guid = string.format("Player-0-RateMeTest%d", n), name = name,
+            class = "WARRIOR", faction = self.myFaction}
+    end
+    self:OpenPartyReview(members, true)
+end
+
+-- Show one row's tag choices in the side panel and mark that row as active.
+function A:SelectPartyTagRow(row)
+    local f = self.partyReview
+    if not f then return end
+    f.activeTagRow = row
+    for _, other in ipairs(f.rows) do
+        local active = other == row
+        self:SetPartyRowActive(other, active)
+        if active then other.tagControl.choices:Show() else other.tagControl.choices:Hide() end
+    end
+    self:PositionPartyTagBridge()
+    self:RefreshPartyTagPanel()
+end
+
+-- Window-coordinate layout of the bridge and the panel's split left edge.
+function A:PositionPartyTagBridge()
+    local f = self.partyReview
+    local row = f and f.activeTagRow
+    local panel = f and f.tagPanel
+    if not panel then return end
+    local top, bottom
+    if row and row.index then
+        local offset = f.scroll.GetVerticalScroll and f.scroll:GetVerticalScroll() or 0
+        local viewportBottom = PARTY_ROWS_TOP - PARTY_VISIBLE_ROWS * PARTY_ROW_STEP + (PARTY_ROW_STEP - PARTY_ROW_HEIGHT)
+        local rowTop = PARTY_ROWS_TOP - (row.index - 1) * PARTY_ROW_STEP + offset
+        top = math.min(rowTop, PARTY_ROWS_TOP)
+        bottom = math.max(rowTop - PARTY_ROW_HEIGHT, viewportBottom)
+        if bottom >= top then top, bottom = nil, nil end
+    end
+    local above, below = panel.border.leftAbove, panel.border.leftBelow
+    above:ClearAllPoints()
+    below:ClearAllPoints()
+    if not top then
+        f.tagBridge:Hide()
+        below:Hide()
+        above:SetPoint("TOPLEFT", f, "TOPLEFT", PARTY_PANEL_BOX_LEFT, PARTY_PANEL_BOX_TOP)
+        above:SetSize(2, PARTY_PANEL_BOX_TOP - PARTY_PANEL_BOX_BOTTOM)
+        above:Show()
+        return
+    end
+    local rowRight = 25 + PARTY_ROWS_WIDTH - 2
+    f.tagBridge:ClearAllPoints()
+    f.tagBridge:SetPoint("TOPLEFT", f, "TOPLEFT", rowRight, top)
+    f.tagBridge:SetSize(PARTY_PANEL_BOX_LEFT + 2 - rowRight, top - bottom)
+    f.tagBridge:Show()
+    above:SetPoint("TOPLEFT", f, "TOPLEFT", PARTY_PANEL_BOX_LEFT, PARTY_PANEL_BOX_TOP)
+    above:SetSize(2, math.max(1, PARTY_PANEL_BOX_TOP - top + 2))
+    below:SetPoint("TOPLEFT", f, "TOPLEFT", PARTY_PANEL_BOX_LEFT, bottom + 2)
+    below:SetSize(2, math.max(1, bottom + 2 - PARTY_PANEL_BOX_BOTTOM))
+    above:Show()
+    below:Show()
+end
+
+function A:RefreshPartyTagPanel()
+    local f = self.partyReview
+    local row = f and f.activeTagRow
+    if not row then return end
+    f.tagPanel.title:SetText("Tags for " .. (row.nameText:GetText() or ""))
+    f.tagPanel.count:SetText(tostring(#row.tagControl.tags) .. " / 3 tags")
 end
 
 function A:UpdatePartyReviewRow(row)
@@ -1204,11 +1540,13 @@ function A:UpdatePartyReviewRow(row)
     row.dirty = row.score ~= row.initialScore or self:EncodeReviewTags(row.tagControl.tags) ~= row.initialTags
 end
 
-function A:OpenPartyReview(members)
+function A:OpenPartyReview(members, testMode)
     if not self.partyReview or type(members) ~= "table" or #members == 0 then return end
     local f = self.partyReview
     f.members = members
+    f.testMode = testMode and true or false
     local count = 0
+    local tagCounts = self:TagUsageCounts()
     for _, target in ipairs(members) do
         if self:ValidateStoredTarget(target) then
             count = count + 1
@@ -1220,7 +1558,7 @@ function A:OpenPartyReview(members)
             row.initialTags = hasPrior and prior.tags or ""
             row.score = row.initialScore
             row.loading = true
-            self:SetTagSelection(row.tagControl, row.initialTags)
+            self:SetTagSelection(row.tagControl, row.initialTags, tagCounts)
             row.loading = false
             row.nameText:SetText(self:DisplayName(target.name))
             local community = self:GetSummary(target.guid)
@@ -1236,8 +1574,14 @@ function A:OpenPartyReview(members)
     end
     for i = count + 1, #f.rows do f.rows[i]:Hide() end
     if count == 0 then return end
-    f.content:SetHeight(math.max(1, count * 168))
-    f.status:SetText(string.format("%d eligible player%s from your last party", count, count == 1 and "" or "s"))
+    f.content:SetHeight(math.max(1, count * PARTY_ROW_STEP - (PARTY_ROW_STEP - PARTY_ROW_HEIGHT)))
+    if f.scroll.SetVerticalScroll then f.scroll:SetVerticalScroll(0) end
+    if f.scrollBar then
+        if count > PARTY_VISIBLE_ROWS then f.scrollBar:Show() else f.scrollBar:Hide() end
+    end
+    self:SelectPartyTagRow(f.rows[1])
+    f.status:SetText(string.format("%d eligible player%s from your last party", count, count == 1 and "" or "s")
+        .. (f.testMode and "  |cffffd100(TEST WINDOW - nothing is saved)|r" or ""))
     f:Show()
     self:MarkWindowShown(f)
     self:ArrangeWindows()
