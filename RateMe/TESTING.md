@@ -7,6 +7,10 @@ Run every tests/*tests.lua suite from the repository root with Lua 5.3+ or texlu
 - broadcast_tests.lua covers routes, coalescing, settings, authenticated authorship, duplicate delivery and deletions during lookups.
 - persistent_lookup_tests.lua covers cached records, serialized reloads, revision merges, tombstones and freshness.
 - communication_subaddon_tests.lua covers dependency loading, dormant companions, API binding and event routing.
+- lookup_queue_tests.lua covers the outgoing lookup budget (2-second spacing, 15 per minute, window lookups exempt), the shared priority queue (ordering, promotion, expiry, nameplate cap, full-queue policy) and the per-sender inbound limit being checked before the global allowance.
+- own_vote_sync_tests.lua covers edits and removals updating the cached own vote immediately, including a lookup that was already running.
+- chat_stars_tests.lua covers the chat filters, star colour/score/separator format, personal fallback and the cases left untouched.
+- window_placement_tests.lua covers the MEDIUM window layer, remembered position and size, the automatic layout, Reset to Default with its confirmation, and the remove-rating confirmation with "Don't ask again".
 - Other suites cover settings, pagination, alignment, badges, activity logging and backward-compatible payload negotiation.
 
 In game, test a fresh prerelease DB (no migration/conversion exists). Submit mixed positive/negative tags, reopen and edit the review, and verify a three-tag limit. Test party saves and removing tags. Verify colours, picker columns, wrapping, Escape handling and window positioning.

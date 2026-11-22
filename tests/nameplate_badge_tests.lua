@@ -10,6 +10,7 @@ local function frame(kind, parent)
     function f:GetHeight()return self.height or 14 end
     function f:EnableMouse(v)self.mouse=v end
     function f:SetFrameStrata(v)self.strata=v end
+    function f:GetFrameStrata()return self.strata or 'MEDIUM' end
     function f:SetFrameLevel(v)self.level=v end
     function f:GetFrameLevel()return self.level or 1 end
     function f:SetPoint(...)self.point={...}end
@@ -47,8 +48,7 @@ function InCombatLockdown()return combat end
 function IsInInstance()if instance then return true,'party' end return false,'none' end
 C_NamePlate={GetNamePlateForUnit=function(unit) if unit=='nameplate1' then return plate end end,
     GetNamePlates=function()return {plate} end}
-local A={db={settings=selected},myGuid='Player-ME-123',nameplateHighlights={},groupFrameHighlights={},
- pendingHighlightTargets={},passiveHighlightBudget={started=0,count=0},lastHighlightQuery=-10,MAX_PENDING=5}
+local A={db={settings=selected},myGuid='Player-ME-123',nameplateHighlights={},groupFrameHighlights={},MAX_PENDING=5}
 function A:Now()return 0 end
 function A:GetPersonalScore(guid) if guid==target.guid then return personal end end
 function A:GetFreshCommunityScore(guid) if guid==target.guid then return community end end
@@ -57,6 +57,7 @@ function A:CaptureUnit(unit) if unit=='nameplate1' then return target end end
 function A:ValidateStoredTarget(x)return x.guid==target.guid end
 function A:ActiveQueries()return 0 end
 function A:Query()return false end
+function A:RequestLookup()return true end
 function A:Debug()end
 local chunk=assert(loadfile('RateMe/Highlights.lua'));chunk('RateMe',A)
 assert(A:HighlightColor(target.guid)==nil,'glow is independently disabled')

@@ -11,6 +11,10 @@ local function frame(kind,name,parent,template)
  function x:SetPoint(...)self.point={...} end
  function x:ClearAllPoints()self.point=nil end
  function x:SetFrameStrata()end
+ -- Window chrome added with the Blizzard frame templates and resizing.
+ for _,k in ipairs({'SetToplevel','Raise','SetResizable','SetResizeBounds','SetMinResize','SetMaxResize','SetFrameLevel','SetNormalTexture','SetHighlightTexture','SetPushedTexture','SetScale','SetVertexColor','SetTexture','SetBackdropBorderColor','SetTextColor','SetWordWrap','SetJustifyV','SetObeyStepOnDrag'}) do if not x[k] then x[k]=function() end end end
+ if not x.GetFrameLevel then function x:GetFrameLevel() return 1 end end
+ if not x.IsResizable then function x:IsResizable() return false end end
  function x:SetClampedToScreen()end
  function x:SetMovable()end
  function x:EnableMouse()end
@@ -69,18 +73,30 @@ local f=A.editor
 assert(not f.comment and not f.commentBox and not f.bytes)
 A:SetTagSelection(f.tagControl,{1,7})
 assert(f.tagControl.count.text=='2 / 3 tags')
-A:OpenTagPicker(f.tagControl)
-local picker=A.tagPicker
+-- Positive/Negative choices are always visible beside the rating.
+local control=f.tagControl
 local count=0
-for _ in pairs(picker.buttons)do count=count+1 end
-assert(count==24)
-assert(not picker.buttons[33].enabled and not picker.buttons[44].enabled) -- fair-looter conflicts
-A:TogglePickerTag(4)
-assert(#f.tagControl.tags==3 and not f.tagControl.add.enabled)
-A:TogglePickerTag(3)
-assert(#f.tagControl.tags==3) -- maximum enforced even through direct callback
-f.tagControl.chips[1].scripts.OnClick()
-assert(#f.tagControl.tags==2 and f.tagControl.add.enabled)
+for _ in pairs(control.buttons)do count=count+1 end
+assert(count==26,'expected 26 active tag choices, got '..count)
+assert(not control.buttons[33].enabled and not control.buttons[44].enabled) -- fair-looter conflicts
+assert(control.buttons[1].enabled and control.buttons[7].enabled) -- selected choices stay clickable
+A:ToggleSelectionTag(control,4)
+assert(#control.tags==3 and not control.buttons[3].enabled,'unselected choices disable at three tags')
+A:ToggleSelectionTag(control,3)
+assert(#control.tags==3) -- maximum enforced even through direct callback
+-- The chosen tags are stacked vertically in the left column, one per row.
+assert(control.vertical and control.tagWidth==452)
+for n=1,3 do
+ local chip=control.chips[n]
+ assert(chip.shown~=false and chip.width==452,'chip '..n..' must span the left column')
+ assert(chip.point[1]=='TOPLEFT' and chip.point[2]==control and chip.point[4]==0 and chip.point[5]==-29-(n-1)*36,
+  'chip '..n..' must sit on its own row')
+end
+control.chips[1].remove.scripts.OnClick()
+assert(#control.tags==2 and control.buttons[3].enabled)
+A:ToggleSelectionTag(control,7)
+assert(#control.tags==1,'clicking a selected choice removes it')
+A:ToggleSelectionTag(control,7)
 assert(A:ReviewTagText(33):find('|cffff5959-Ninja Looter',1,true))
 assert(A:ReviewTagText(1):find('|cff59ff73+Leader',1,true))
 local submitted
@@ -90,7 +106,7 @@ A.DisplayName=function(_,n)return n or 'Target' end
 f.target={guid='Player-1-bb'};f.score=5
 f.save.scripts.OnClick()
 assert(submitted==A:EncodeReviewTags(f.tagControl.tags))
--- The post-party editor uses the same picker, tags and dirty-state comparison.
+-- The post-party editor uses the same tag control and dirty-state comparison.
 A:CreatePartyReviewWindow()
 local row=A:CreatePartyReviewRow(1)
 assert(not row.comment and row.tagControl)
@@ -101,4 +117,4 @@ assert(row.dirty)
 row.initialScore=4;row.initialTags=A:EncodeReviewTags({33})
 A:UpdatePartyReviewRow(row)
 assert(not row.dirty)
-print('PASS: tag editor, split picker, three-tag limit, conflicts, removal, colours, save and party dirty state')
+print('PASS: tag editor, Positive/Negative choices, stacked tags, three-tag limit, conflicts, removal, colours, save and party dirty state')

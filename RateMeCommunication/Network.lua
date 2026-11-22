@@ -309,7 +309,7 @@ function A:Query(target, force, interactive)
     if self:ActiveQueries() >= self.MAX_PENDING then return false, "busy" end
     local budget = self.lookupBudget
     if not budget or t - budget.started >= 60 then
-        budget = {started = t, count = 0, last = budget and budget.last or 0}
+        budget = {started = t, count = 0, last = budget and budget.last or -math.huge}
         self.lookupBudget = budget
     end
     if not interactive and (budget.count >= LOOKUP_PER_MINUTE

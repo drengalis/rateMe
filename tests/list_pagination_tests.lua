@@ -29,6 +29,10 @@ local function mock(kind,name,parent)
     function o:SetBackdropColor() end
     function o:SetAlpha() end
     function o:SetFrameStrata() end
+    -- Window chrome added with the Blizzard frame templates and resizing.
+    for _,k in ipairs({'SetToplevel','Raise','SetResizable','SetResizeBounds','SetMinResize','SetMaxResize','SetFrameLevel','SetNormalTexture','SetHighlightTexture','SetPushedTexture','SetScale','SetVertexColor','SetTexture','SetBackdropBorderColor','SetTextColor','SetWordWrap','SetJustifyV','SetObeyStepOnDrag'}) do if not o[k] then o[k]=function() end end end
+    if not o.GetFrameLevel then function o:GetFrameLevel() return 1 end end
+    if not o.IsResizable then function o:IsResizable() return false end end
     function o:SetClampedToScreen() end
     function o:SetMovable() end
     function o:EnableMouse() end
@@ -68,8 +72,11 @@ local f=A.main
 f.settingsPanel=mock('Frame','settingsPanel')
 A.DrawSettings=function() end -- the separate settings contract test covers this panel
 A:DrawMain()
-assert(f.search.point[2]==72 and f.search.width==400, 'Search should be closer to label and wider')
-assert(f.searchLabel.point[1]=='RIGHT' and f.searchLabel.point[2]==f.search and f.searchLabel.point[4]==-13 and f.search.point[3]==-520)
+-- The footer is anchored to the bottom edge so it follows window resizing:
+-- 45 = 565 (window height) - 520 (the original top-based offset).
+assert(f.search.point[1]=='TOPLEFT' and f.search.point[2]==f and f.search.point[3]=='BOTTOMLEFT'
+    and f.search.point[4]==72 and f.search.width==400, 'Search should be closer to label and wider')
+assert(f.searchLabel.point[1]=='RIGHT' and f.searchLabel.point[2]==f.search and f.searchLabel.point[4]==-13 and f.search.point[5]==45)
 assert(f.clearSearch.point[1]=='LEFT' and f.clearSearch.point[2]==f.search and f.clearSearch.point[4]==6 and f.clearSearch.point[5]==-1)
 assert(not f.allCharacters and not f.refresh, 'List footer must not have All Characters or Refresh buttons')
 assert(not f.clearSearch.enabled, 'Clear button should be disabled when search is empty')

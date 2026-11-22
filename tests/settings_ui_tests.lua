@@ -61,7 +61,7 @@ local chunk=assert(loadfile('RateMe/UI.lua'))
 chunk('RateMe', A)
 A:CreateSettingsPanel()
 local p=A.main.settingsPanel.content
-assert(p.height==1397 and p.width==699)
+assert(p.height==1542 and p.width==699)
 assert(A.main.settingsPanel.scrollChild==p)
 assert(p.enabled and p.alertPersonal and p.alertCommunity and p.threshold and p.personalThreshold)
 assert(p.highlights and p.highlightGlow and p.highlightBadge and p.highlightPersonal and p.highlightCommunity and p.minimapVisible and p.partyReviewPrompt and p.allCharacters and p.debug)
@@ -69,7 +69,7 @@ local cards={}
 for _,o in ipairs(objects) do
  if o.parent==p and o.bgColor then cards[#cards+1]=o end
 end
-assert(#cards==7,'Expected seven distinct sections, got '..#cards)
+assert(#cards==8,'Expected eight distinct sections, got '..#cards)
 local previousBottom=0
 for _,card in ipairs(cards) do
  assert(card.bgColor[4]==1,'Panels must be opaque')

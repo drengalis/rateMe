@@ -41,7 +41,7 @@ dofile("tests/load_communication_addon.lua")(A)
 
 local target={guid='Player-ABC-123',name='Target-Realm',faction='Alliance'}
 local function reset()
- t=0;events={};send={};A.runtime={requests={},cache={},seen={},comments={}};A.db={ignored={},authored={[A:Key(A.myName)]={}},settings={},peers={},recent={},community={}};A.data=A.db;A.own=nil;A.outbox={};A.netStats={};A.inbound={};A.nextSend=0;A.counter=0;A.lastHello=0;A.globalInbound=nil
+ t=0;events={};send={};A.runtime={requests={},cache={},seen={},comments={}};A.db={ignored={},authored={[A:Key(A.myName)]={}},settings={},peers={},recent={},community={}};A.data=A.db;A.own=nil;A.outbox={};A.netStats={};A.inbound={};A.nextSend=0;A.counter=0;A.lastHello=0;A.globalInbound=nil;A.lookupBudget=nil;A.lookupQueue=nil;A.backgroundLookupBudget=nil
  for i=1,60 do local name=string.format('Peer%03d-Realm',i); A.data.peers[A:Key(name)]={name=name,seen=100000} end
 end
 local function countQueued(tag) local n=0;for _,v in ipairs(A.outbox)do if v.message:match('^'..tag..'|') then n=n+1;assert(v.channel=='WHISPER') end end;return n end

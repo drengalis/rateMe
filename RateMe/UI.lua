@@ -481,6 +481,7 @@ function A:CreateMainWindow()
     f.nextPage:ClearAllPoints()
     f.nextPage:SetPoint("TOPLEFT", f.pageIndicator, "TOPRIGHT", 12, 6)
     f:SetScript("OnShow", function()
+        f:Raise()
         A:MarkWindowShown(f)
         A:DrawMain()
         A:ArrangeWindows()
@@ -524,7 +525,7 @@ function A:CreateSettingsPanel()
         card:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
             edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1,
             insets = { left = 1, right = 1, top = 1, bottom = 1 } })
-        card:SetBackdropColor(0, 0, 0, 0.35)
+        card:SetBackdropColor(0.07, 0.065, 0.06, 1) -- opaque, neutral dark
         card:SetBackdropBorderColor(BRONZE[1], BRONZE[2], BRONZE[3], 1)
         -- A previous 3px gold accent rendered as a stray glyph beside headings
         -- on Forever. Keep the gold heading without that decorative bar.

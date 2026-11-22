@@ -28,6 +28,10 @@ local function mock(kind, name, parent)
     function obj:SetBackdropColor() end
     function obj:SetAlpha() end
     function obj:SetFrameStrata() end
+    -- Window chrome added with the Blizzard frame templates and resizing.
+    for _,k in ipairs({'SetToplevel','Raise','SetResizable','SetResizeBounds','SetMinResize','SetMaxResize','SetFrameLevel','SetNormalTexture','SetHighlightTexture','SetPushedTexture','SetScale','SetVertexColor','SetTexture','SetBackdropBorderColor','SetTextColor','SetWordWrap','SetJustifyV','SetObeyStepOnDrag'}) do if not obj[k] then obj[k]=function() end end end
+    if not obj.GetFrameLevel then function obj:GetFrameLevel() return 1 end end
+    if not obj.IsResizable then function obj:IsResizable() return false end end
     function obj:SetClampedToScreen() end
     function obj:SetMovable() end
     function obj:EnableMouse() end

@@ -26,7 +26,8 @@ local labels={
  [11]='Protects Teammates',[12]='Good Sportsmanship',[33]='Ninja Looter',[34]='Toxic',
  [35]='Griefer',[36]='Frequently AFK',[37]='Abandons Groups',[38]='Uncooperative',
  [39]='Ignores Mechanics',[40]='Reckless Pulls',[41]='Unprepared',[42]='Poor Communication',
- [43]='Breaks Crowd Control',[44]='Disrespects Loot Rules'}
+ [43]='Breaks Crowd Control',[44]='Disrespects Loot Rules',
+ [13]='Shares Resources',[45]='Resource Hog'}
 for id,name in pairs(labels)do
  assert(a.TAG_REGISTRY[id].name==name,'Permanent ID changed: '..id)
  assert(a.TAG_REGISTRY[id].positive==(id<33))
@@ -34,7 +35,8 @@ end
 assert(a:EncodeReviewTags({1,7,40})=='BHo') -- permanent byte mapping
 assert(a:EncodeReviewTags({40,7,1})=='BHo')
 assert(a:EncodeReviewTags(nil)=='')
-for _,invalid in ipairs({{1,1},{0},{13},{1,2,3,4},{7,33},{9,41},'free text','!!!!'})do
+-- 14 is an unassigned ID; 13/45 are the Shares Resources/Resource Hog opposites.
+for _,invalid in ipairs({{1,1},{0},{14},{1,2,3,4},{7,33},{9,41},{13,45},'free text','!!!!'})do
  assert(a:EncodeReviewTags(invalid)==nil)
 end
 local target={guid='Player-1-bb',name='Target-Realm',faction='Alliance',class='MAGE'}
