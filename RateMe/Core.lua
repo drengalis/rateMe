@@ -110,7 +110,10 @@ function A:CaptureUnit(unit)
         local display = self:CleanName(name .. "-" .. (realm or ""):gsub("%s", ""))
         if not display then return nil end
         local _, class = UnitClass(unit)
-        return { guid = guid, name = display, class = class, faction = self.myFaction or UnitFactionGroup("player") }
+        -- fromGame: the name came from the game itself, so it outranks any
+        -- name another player sends for this ID.
+        return { guid = guid, name = display, class = class, faction = self.myFaction or UnitFactionGroup("player"),
+            fromGame = true }
     end)
     return ok and target or nil
 end

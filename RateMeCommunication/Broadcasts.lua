@@ -2,6 +2,10 @@
 local _, Communication = ...
 local A = Communication.API
 local CHANNEL_NAME = "RateMeNet"
+-- Announcements also whisper the most recently seen peers (for players on other
+-- backend realms), but only a few: each whisper is two messages, and the channel,
+-- guild and group routes already reach everyone else.
+local BROADCAST_PEER_WHISPERS = 10
 
 function A:GetLookupPeerCount()
     local settings = self.db and self.db.settings
@@ -71,7 +75,7 @@ function A:BroadcastOwnRating(record)
     elseif IsInRaid and IsInRaid() then queue("RAID")
     elseif IsInGroup and IsInGroup() then queue("PARTY") end
     -- Also reach all recently confirmed contacts, including other backend realms.
-    for _, peer in ipairs(self:PeerNames(nil, 120)) do queue("WHISPER", peer) end
+    for _, peer in ipairs(self:PeerNames(nil, BROADCAST_PEER_WHISPERS)) do queue("WHISPER", peer) end
     if sent == 0 then
         self:Debug("No rating announcement route is currently available. Your rating is saved locally.")
     else
@@ -96,8 +100,10 @@ function A:HandleRatingBroadcast(args, sender)
     vote.sender, vote.freshAt = self:CleanName(sender), self:Now()
     if not self:SaveCommunityRating(target, key, vote) then return end
     self:ApplyPendingReviewTags(target.guid, key, vote)
-    self:RememberPeer(sender)
-    self:RememberTarget(target)
+    -- An announcement proves nothing about answering lookups: newcomer tier.
+    self:RememberPeer(sender, "greeting")
+    -- Announcements are saved, but never added to Recent Lookups: that list is
+    -- only for players this player looked up or rated.
     local cache = self.runtime.cache[target.guid] or {votes={}}
     cache.votes[key] = vote.score > 0 and vote or nil
     cache.lastComplete = self:Stamp()

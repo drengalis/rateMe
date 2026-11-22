@@ -3,6 +3,7 @@
 local _, Store = ...
 _G.RateMeDataStore = Store
 Store.SCHEMA_VERSION = 1
+local UNVERIFIED_REVIEW_DAYS = 90
 Store.API = Store.API or {}
 
 local function dateOf(item)
@@ -59,6 +60,33 @@ function Store:Open(protocol, now, recentLimit)
         db.peerProtocol = protocol
     end
     pruneOldest(db.recent, recentLimit or 150, dateOf)
+    -- Reviews nobody has confirmed (passed along by someone other than the
+    -- author) are deleted 90 days after this client received them; a player left with no reviews is
+    -- removed. Verified reviews, including removals, are kept.
+    local unverifiedCutoff = (now or 0) - UNVERIFIED_REVIEW_DAYS * 86400
+    for guid, item in pairs(db.community) do
+        if type(item) ~= "table" or type(item.votes) ~= "table" then
+            db.community[guid] = nil
+        else
+            for key, vote in pairs(item.votes) do
+                local verified = type(vote) == "table" and type(vote.verifiedAt) == "number" and vote.verifiedAt > 0
+                if type(vote) ~= "table" then
+                    item.votes[key] = nil
+                elseif not verified then
+                    -- Expiry uses when this client received the review, never the
+                    -- date it claims. Reviews saved before receipt
+                    -- times existed count as received now.
+                    local received = tonumber(vote.receivedAt)
+                    if not received then
+                        vote.receivedAt = now or 0
+                    elseif received < unverifiedCutoff then
+                        item.votes[key] = nil
+                    end
+                end
+            end
+            if next(item.votes) == nil then db.community[guid] = nil end
+        end
+    end
     local cutoff = (now or 0) - 7 * 86400
     for key, peer in pairs(db.peers) do
         if type(peer) ~= "table" or type(peer.seen) ~= "number" or peer.seen < cutoff then

@@ -79,7 +79,9 @@ local A = {myName='Me-Realm', myGuid='Player-1-aa', myFaction='Alliance', protoc
 function A:Now() return 0 end
 function A:Stamp() return 1800000000 end
 function A:Key(n) return type(n) == 'string' and n:lower() or nil end
-function A:DisplayName(n) return n end
+function A:DisplayName(n) return (n:gsub('%-', ' ')) end
+function A:ValidateStoredTarget(t) return t.faction == 'Alliance' and t.guid ~= self.myGuid end
+function A:CleanName(n) return type(n) == 'string' and n or nil end
 function A:RestoreCommunityLookups() end
 local logs = {}
 function A:Log(m) logs[#logs+1] = m end
@@ -177,7 +179,7 @@ editor.target = target; editor:Show()
 editor.remove.scripts.OnClick()
 local confirm = A.removeConfirm
 assert(confirm and confirm:IsShown() and #removed == 0, 'confirmation shown before removing')
-assert(confirm.text.text == 'Remove your rating for Target-Realm?', 'question only: '..tostring(confirm.text.text))
+assert(confirm.text.text == 'Remove your rating for Target Realm?', 'question only: '..tostring(confirm.text.text))
 assert(confirm.dontAsk:GetChecked() == false, '"Don\'t ask again" starts unticked')
 -- One bottom row: checkbox on the left; Remove then Cancel on the right, not overlapping.
 local accept, cancel = confirm.accept.point, confirm.cancel.point
@@ -214,3 +216,76 @@ editor.target = target; editor:Show(); confirm:Hide()
 editor.remove.scripts.OnClick()
 assert(#removed == 4 and not confirm:IsShown(), 'no confirmation when the setting is off')
 print('PASS: remove confirmation (default on), cancel, original target, "Don\'t ask again", setting off')
+
+-- The party rating window shows each player's class next to their name.
+A:CreatePartyReviewWindow()
+A:OpenPartyReview({
+    {guid='Player-1-dd', name='Kirikou-John', class='PRIEST', faction='Alliance'},
+    {guid='Player-1-ee', name='Nameless-Realm', faction='Alliance'},
+})
+local party = A.partyReview
+assert(party.rows[1].nameText.text == 'Kirikou John  •  PRIEST', 'name and class: '..tostring(party.rows[1].nameText.text))
+assert(party.rows[2].nameText.text == 'Nameless Realm', 'no class: name only')
+print('PASS: party rating window shows "Name  •  CLASS"')
+
+-- Windows keep the "name came from the game" mark when they copy a player.
+function A:Query() return true end
+A:OpenEditor({guid='Player-1-ff', name='Game-Name', faction='Alliance', class='MAGE', fromGame=true})
+assert(A.editor.target.fromGame == true, 'rating window keeps the game-name mark')
+A:OpenEditor({guid='Player-1-fe', name='Other-Name', faction='Alliance', class='MAGE'})
+assert(not A.editor.target.fromGame, 'and does not invent one')
+print('PASS: rating window keeps the game-name mark')
+
+-- Lookups the player starts always run, whatever the automatic-lookup settings.
+A.db.settings.lookupOnHover, A.db.settings.ratingHighlights, A.db.settings.lowRatingAlerts = false, false, false
+local queried = {}
+function A:Query(t, force, interactive) queried[#queried + 1] = {force = force, interactive = interactive}; return true end
+A:CreateReviewsWindow()
+local player = {guid='Player-1-fd', name='Some-Player', faction='Alliance', class='MAGE', fromGame=true}
+A:OpenEditor(player)
+A:OpenReviews(player)
+A.reviews.refresh.scripts.OnClick()
+assert(#queried == 3, 'rating window, reviews window and Refresh each look the player up: '..#queried)
+assert(queried[1].interactive and queried[2].interactive and queried[3].interactive and queried[3].force,
+    'started by the player: never held back; Refresh forces a new lookup')
+-- The Settings checkbox controls the hover setting.
+local box = A.main.settingsPanel.content.lookupOnHover
+box:SetChecked(true); box.scripts.OnClick(box)
+assert(A.db.settings.lookupOnHover == true, 'checkbox turns hover lookups on')
+box:SetChecked(false); box.scripts.OnClick(box)
+assert(A.db.settings.lookupOnHover == false, 'and off')
+print('PASS: windows and Refresh always look up; Settings checkbox controls hover lookups')
+
+-- Community Reviews shows 20 reviews per page, most useful first.
+function A:DateText(n) return tostring(n) end
+function A:WindowScoreText(n) return tostring(n) end
+function A:ScoreText() return '' end
+local paged = {guid='Player-1-pg', name='Paged-Player', faction='Alliance', class='MAGE', fromGame=true}
+local votes = {}
+local function letters(i) return string.char(97 + math.floor((i - 1) / 26)) .. string.char(97 + (i - 1) % 26) end
+for i = 1, 45 do
+    votes['peer' .. letters(i) .. '-realm'] = {sender='Peer' .. letters(i) .. '-Realm', score=3, rev=1, date=1000 + i, via='Relay-Realm'}
+end
+votes['verified-realm'] = {sender='Verified-Realm', score=4, rev=1, date=10, verifiedAt=1}
+votes['me-realm'] = {sender='Me-Realm', score=5, rev=1, date=5}
+A.runtime.cache[paged.guid] = {votes=votes}
+A:OpenReviews(paged)
+local rv = A.reviews
+assert(rv.pageIndicator.text == 'Page 1 of 3', 'pages: ' .. tostring(rv.pageIndicator.text))
+assert(#rv.rows == 20, 'at most 20 rows are created: ' .. #rv.rows)
+assert(rv.rows[1].reviewer == 'me-realm' and rv.rows[2].reviewer == 'verified-realm',
+    'your review first, then verified ones')
+assert(rv.rows[3].vote.date == 1045 and rv.rows[4].vote.date == 1044, 'then unverified, newest first')
+assert(rv.previousPage.enabled == false and rv.nextPage.enabled == true)
+rv.nextPage.scripts.OnClick()
+assert(rv.pageIndicator.text == 'Page 2 of 3' and rv.rows[1].vote.date == 1027 and #rv.rows == 20)
+rv.nextPage.scripts.OnClick()
+local visible = 0
+for _, row in ipairs(rv.rows) do if row.shown then visible = visible + 1 end end
+assert(rv.pageIndicator.text == 'Page 3 of 3' and visible == 7 and rv.nextPage.enabled == false, 'last page: 7 reviews')
+rv.previousPage.scripts.OnClick()
+assert(rv.pageIndicator.text == 'Page 2 of 3')
+-- Opening another player starts at page 1.
+A:OpenReviews(player)
+assert(rv.page == 1 and rv.pageIndicator.text == 'Page 1 of 1')
+print('PASS: Community Reviews pages of 20; own, verified, then unverified, newest first')

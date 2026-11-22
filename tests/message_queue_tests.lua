@@ -1,3 +1,7 @@
+-- Message traffic: the outgoing queue, the lookup budget and lookup queue, and incoming limits.
+
+-- Lookup budget, lookup queue and incoming limits
+do
 -- Outgoing lookup budget, the shared lookup queue and inbound flood isolation.
 local A = {protocol='1',prefix='RATEME',myName='Me-Realm',myFaction='Alliance',myGuid='Player-123-456',
     CACHE_SECONDS=900,QUERY_SECONDS=15,MAX_PENDING=100,MAX_COMMENT=160}
@@ -144,3 +148,121 @@ for i=1,100 do if A:AllowInbound(string.format('Client%03d-Realm',i)) then other
 assert(others==100,'other players are still accepted after a flood: '..others)
 assert((A.netStats.droppedGlobal or 0)==0 and A.netStats.droppedPeer==182)
 print('PASS: per-sender limit checked before the global allowance')
+end
+
+-- Outgoing queue order, queue limits, retries and shared-lookup replies
+do
+-- Announcements must never delay or crowd out lookups and replies, and
+-- other players must not be able to fill the outgoing queue.
+local function boot(name)
+ local a={myName=name or 'Me-Realm',myGuid='Player-1-aa',myFaction='Alliance',clock=0}
+ function a:Now()return self.clock end
+ function a:Stamp()return 1800000000+math.floor(self.clock)end
+ function a:CleanName(n)if type(n)~='string' or #n<2 or #n>80 or n:find('[%s|%c]')then return nil end;return n end
+ function a:Key(n)local v=self:CleanName(n);return v and v:lower()end
+ function a:DisplayName(n)return n end
+ function a:ValidateStoredTarget(t)return t.faction=='Alliance' and t.guid~=self.myGuid end
+ function a:NotifyUI()end
+ function a:RefreshTooltip()end
+ function a:Log()end
+ function a:Debug()end
+ local store=dofile('tests/load_data_addon.lua');store:Bind(a)
+ dofile('tests/load_communication_addon.lua')(a)
+ a:InitializeStorage()
+ a.outbox={};a.counter=0;a.nextSend=0;a.inbound={}
+ return a
+end
+RateMeDB=nil
+local timers={}
+C_Timer={After=function(delay,fn)timers[#timers+1]=fn end,NewTicker=function()end}
+local sent={}
+local nextResult=0
+C_ChatInfo={SendAddonMessage=function(prefix,message,channel,target)
+ sent[#sent+1]={message=message,channel=channel,target=target};return nextResult end}
+GetChannelName=function()return 4 end
+JoinTemporaryChannel=function()end
+IsInGuild=function()return true end
+IsInGroup=function()return false end
+IsInRaid=function()return false end
+local function kind(job)return job.message:match('^([^|]+)')..(job.message:sub(1,6)=='T|1|-|' and '-' or '') end
+
+-- Announcing a rating whispers at most 10 peers, and lookups jump ahead of it.
+local a=boot()
+for i=1,60 do a:RememberPeer(string.format('Peer%03d-Realm',i)) end
+local target={guid='Player-1-bb',name='Target-Realm',faction='Alliance',class='MAGE'}
+assert(a:SaveOwnRating(target,5,{1}))
+for _,fn in ipairs(timers) do fn() end;timers={}
+local whispers=0
+for _,job in ipairs(a.outbox) do
+ assert(job.bulk,'announcement packets are bulk: '..job.message)
+ if job.channel=='WHISPER' then whispers=whispers+1 end
+end
+assert(#a.outbox==24 and whispers==20,'channel + guild + 10 peers, 2 packets each: '..#a.outbox)
+local lookupTarget={guid='Player-1-cc',name='Other-Realm',faction='Alliance'}
+assert(a:Query(lookupTarget,false,true))
+for _,fn in ipairs(timers) do fn() end;timers={}
+assert(kind(a.outbox[1])=='Q' and not a.outbox[1].bulk,'lookup request goes to the front: '..a.outbox[1].message)
+local firstBulk
+for index,job in ipairs(a.outbox) do if job.bulk then firstBulk=index;break end end
+for index,job in ipairs(a.outbox) do
+ assert((index<firstBulk)==(not job.bulk),'every lookup packet sits ahead of every announcement')
+end
+-- Sending order follows the queue: the lookup leaves first.
+a:FlushMessages()
+assert(kind(sent[#sent])=='Q','the lookup is sent before the announcement')
+print('PASS: announcements whisper 10 peers; lookups and replies go ahead of announcements')
+
+-- Announcements may use only part of the queue; a full queue drops announcements first.
+RateMeDB=nil
+local q=boot()
+for i=1,130 do q:QueueSend('B|1|x'..i,'GUILD') end
+local bulk=0
+for _,job in ipairs(q.outbox) do if job.bulk then bulk=bulk+1 end end
+assert(bulk==120,'announcements limited to 120 queued: '..bulk)
+for i=1,240 do assert(q:QueueSend('A|1','WHISPER','Peer'..i..'-Realm'),'control message '..i) end
+assert(#q.outbox==360)
+assert(q:QueueSend('A|1','WHISPER','Late-Realm'),'a full queue makes room for a reply')
+bulk=0
+for _,job in ipairs(q.outbox) do if job.bulk then bulk=bulk+1 end end
+assert(#q.outbox==360 and bulk==119,'the newest announcement was dropped')
+assert(q.outbox[#q.outbox].message=='B|1|x119','newest announcement dropped first')
+assert(not q:QueueSend('B|1|late','GUILD'),'announcements never displace other messages')
+for i=1,119 do table.remove(q.outbox) end -- only the 241 control messages are left
+for i=1,119 do q:QueueSend('A|1','WHISPER','Fill'..i..'-Realm') end
+assert(#q.outbox==360 and not q:QueueSend('A|1','WHISPER','Over-Realm'),'with no announcements to drop, a full queue refuses')
+print('PASS: announcement share of the queue capped; full queue drops announcements first')
+
+-- A message waiting to be retried does not hold up the rest of the queue.
+RateMeDB=nil
+local f=boot()
+f:QueueSend('A|1','WHISPER','First-Realm')
+f:QueueSend('A|1','WHISPER','Second-Realm')
+sent={};nextResult=3 -- WoW throttled the first send
+f:FlushMessages()
+nextResult=0
+assert(#f.outbox==2 and f.outbox[2].target=='First-Realm' and f.outbox[2].due>f.clock,'throttled message waits to retry')
+f.clock=f.clock+0.4;f:FlushMessages()
+assert(sent[#sent].target=='Second-Realm','the next message is sent while the first waits')
+f.clock=f.clock+0.4;f:FlushMessages()
+assert(#f.outbox==1,'the retry is not sent before it is due')
+f.clock=f.clock+2;f:FlushMessages()
+assert(#f.outbox==0 and sent[#sent].target=='First-Realm','the retry is sent once due')
+print('PASS: a held-back message does not stall the queue')
+
+-- Shared-review lookups are answered only for known peers, with at most 25 replies.
+RateMeDB=nil
+local s=boot('Middle-Realm')
+for i=1,60 do
+ assert(s:SaveCommunityRating(target,'reviewer'..i..'-realm',
+  {sender='Reviewer'..i..'-Realm',score=4,rev=1,date=1800000001,tags=''}))
+end
+local packet=s.payload:SharedLookup('ab-1',target,0)
+s:OnMessage('RATEME',packet,'WHISPER','Stranger-Realm',false)
+assert(#s.outbox==0,'no replies to a player who is not a known peer')
+s:RememberPeer('Friend-Realm')
+s:OnMessage('RATEME',packet,'WHISPER','Friend-Realm',false)
+local replies=0
+for _,job in ipairs(s.outbox) do if job.message:sub(1,2)=='V|' then replies=replies+1 end end
+assert(replies==25,'at most 25 replies per shared lookup: '..replies)
+print('PASS: shared lookups answered only for known peers, at most 25 replies')
+end

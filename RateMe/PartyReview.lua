@@ -46,6 +46,7 @@ local function copyMembers(members)
     for _, target in pairs(members or {}) do
         copied[#copied + 1] = {
             guid = target.guid, name = target.name, class = target.class, faction = target.faction,
+            fromGame = target.fromGame,
         }
     end
     table.sort(copied, function(a, b)

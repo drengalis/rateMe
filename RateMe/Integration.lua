@@ -32,22 +32,29 @@ function A:AddTooltip(tooltip)
     local summary = self:GetSummary(target.guid)
     tooltip:AddLine(" ")
     tooltip:AddLine("Rate Me!", 1, 0.72, 0.28)
+    local unverified = summary and summary.unverifiedCount or 0
     if summary and summary.count > 0 then
         local stars = self:StarMarkup(summary.average, 13)
-        tooltip:AddDoubleLine("Community", string.format("%s  (%d ratings)", stars, summary.count),
+        tooltip:AddDoubleLine("Community", string.format("%s  (%d verified)", stars, summary.count),
             0.91, 0.91, 0.87, 1, 0.78, 0.30)
-        if summary.peerCount and summary.peerCount>0 then
-            tooltip:AddLine(tostring(summary.peerCount).." review(s) supplied by peers; authors unverified",1,0.75,0.3)
-        end
         if not summary.fresh then tooltip:AddLine("Cached rating — checking online peers", 0.61, 0.65, 0.7) end
+    elseif unverified > 0 then
+        tooltip:AddLine("No verified community ratings", 0.63, 0.68, 0.73)
     else
         tooltip:AddLine("No community ratings available", 0.63, 0.68, 0.73)
+    end
+    -- Unverified (peer-supplied) reviews are never part of the average.
+    if unverified > 0 then
+        tooltip:AddLine(string.format("%d unverified review%s, not counted", unverified, unverified == 1 and "" or "s"),
+            1, 0.75, 0.3)
     end
     local mine = self:GetOwnRating(target.guid)
     if mine and not mine.removed then
         tooltip:AddDoubleLine("Your rating", self:StarMarkup(mine.score, 13), 0.91, 0.91, 0.87, 1, 0.78, 0.30)
     end
-    self:RequestLookup(target, 1)
+    -- Hovering only asks other users when the player allows it;
+    -- otherwise the tooltip shows what is already known.
+    if self.db.settings.lookupOnHover then self:RequestLookup(target, 1) end
 end
 
 local MENU_TAGS = {
@@ -185,7 +192,7 @@ function A:CaptureGUID(guid, context)
     end
     local display = self:CleanName(name .. "-" .. (realm or ""):gsub("%s", ""))
     if not display then return nil end
-    return { guid = guid, name = display, class = class, faction = mine }
+    return { guid = guid, name = display, class = class, faction = mine, fromGame = true }
 end
 
 function A:MenuTarget(owner, context)
@@ -265,6 +272,50 @@ function A:CaptureByName(name, context)
     return nil
 end
 
+-- Friends and guild members are trusted peers: the game's own lists
+-- decide, so strangers cannot fake it. Keys use the same Name-Realm form as
+-- the peer list. Rebuilt whenever the friends list or guild roster changes.
+function A:RefreshTrustedPeers()
+    local keys = {}
+    if C_FriendList and C_FriendList.GetNumFriends and C_FriendList.GetFriendInfoByIndex then
+        for i = 1, (safeCall(C_FriendList.GetNumFriends) or 0) do
+            local info = safeCall(C_FriendList.GetFriendInfoByIndex, i)
+            local name = type(info) == "table" and plainString(info.name)
+            local key = name and self:Key(name)
+            if key then keys[key] = "friend" end
+        end
+    end
+    if IsInGuild and IsInGuild() and GetNumGuildMembers and GetGuildRosterInfo then
+        for i = 1, (safeCall(GetNumGuildMembers) or 0) do
+            local name = plainString((safeCall(GetGuildRosterInfo, i)))
+            local key = name and self:Key(name)
+            if key and not keys[key] then keys[key] = "guild" end
+        end
+    end
+    self.trustedPeerKeys = keys
+end
+
+function A:IsTrustedPeerKey(key)
+    return key ~= nil and self.trustedPeerKeys ~= nil and self.trustedPeerKeys[key] ~= nil
+end
+
+-- /rateme peers: how many peers are in each tier, and which are friends/guild.
+function A:PeerSummaryText()
+    local counts, trusted, online = {0, 0, 0}, {}, 0
+    local cutoff = self:Stamp() - 3600
+    for key, peer in pairs(self.data.peers) do
+        local tier = self:PeerTier(key, peer)
+        counts[tier] = counts[tier] + 1
+        if peer.seen and peer.seen >= cutoff then online = online + 1 end
+        if tier == 1 then trusted[#trusted + 1] = self:DisplayName(peer.name) end
+    end
+    table.sort(trusted)
+    local text = string.format("%d known peers: %d friends/guild, %d proven, %d new (%d seen in the last hour).",
+        counts[1] + counts[2] + counts[3], counts[1], counts[2], counts[3], online)
+    if #trusted > 0 then text = text .. " Friends/guild: " .. table.concat(trusted, ", ") .. "." end
+    return text
+end
+
 -- /rateme debug: describe every unit menu so unknown tags and context fields
 -- on this client can be identified.
 local function describeContext(context)
@@ -315,9 +366,7 @@ function A:InitializeIntegration()
         elseif msg == "netstats" then
             A:Log(A:NetworkStatsText())
         elseif msg == "peers" then
-            local count = 0
-            for _ in pairs(A.data.peers) do count = count + 1 end
-            A:Log(count .. " known peers in directory (not necessarily online).")
+            A:Log(A:PeerSummaryText())
         elseif msg == "minimap" then
             A:SetMinimapVisible(not A.db.settings.minimapVisible)
             A:DrawSettings()
@@ -335,6 +384,19 @@ function A:InitializeIntegration()
         else
             A:ToggleMain()
         end
+    end
+    -- Keep the friends/guild list of trusted peers current.
+    self:RefreshTrustedPeers()
+    local trustWatcher = CreateFrame("Frame")
+    for _, event in ipairs({"FRIENDLIST_UPDATE", "GUILD_ROSTER_UPDATE", "PLAYER_GUILD_UPDATE"}) do
+        pcall(trustWatcher.RegisterEvent, trustWatcher, event)
+    end
+    trustWatcher:SetScript("OnEvent", function() A:RefreshTrustedPeers() end)
+    self.trustWatcher = trustWatcher
+    -- Ask the server for the guild roster so guildmates are known early.
+    if IsInGuild and IsInGuild() then
+        if C_GuildInfo and C_GuildInfo.GuildRoster then pcall(C_GuildInfo.GuildRoster)
+        elseif GuildRoster then pcall(GuildRoster) end
     end
     if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall
         and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Unit then

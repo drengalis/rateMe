@@ -298,12 +298,23 @@ function A:WindowScoreText(score, size)
     return self:StarMarkup(value, size) .. " " .. string.format("%.1f", roundedTenth)
 end
 
+-- "N unverified, not counted" for reviews left out of the average.
+function A:UnverifiedText(summary)
+    local n = summary and summary.unverifiedCount or 0
+    if n <= 0 then return nil end
+    return string.format("%d unverified, not counted", n)
+end
+
 function A:ScoreText(summary)
-    if not summary or not summary.average or summary.count == 0 then return "No ratings available" end
-    local text = self:WindowScoreText(summary.average, 15) .. string.format("  (%d rating%s)",
+    local unverified = self:UnverifiedText(summary)
+    if not summary or not summary.average or summary.count == 0 then
+        if unverified then return "No verified ratings  \194\183  " .. unverified end
+        return "No ratings available"
+    end
+    local text = self:WindowScoreText(summary.average, 15) .. string.format("  (%d verified rating%s)",
         summary.count, summary.count == 1 and "" or "s")
     if not summary.fresh then text = text .. "  [cached]" end
-    if summary.peerCount and summary.peerCount>0 then text=text.."  ("..summary.peerCount.." peer supplied)" end
+    if unverified then text = text .. "  \194\183  " .. unverified end
     return text
 end
 
@@ -500,7 +511,7 @@ function A:CreateSettingsPanel()
     -- hard-coded 665/640 widths that left a large unused strip on the right.
     -- Match future size changes (including UI-scale changes) automatically.
     local p = CreateFrame("Frame", nil, scroll)
-    p:SetSize(699, 1542) -- eight responsive sections, including communication and reset
+    p:SetSize(699, 1624) -- eight responsive sections, including communication and reset
     scroll:SetScrollChild(p)
     scroll.content = p
     scroll:SetScript("OnSizeChanged", function(_, width)
@@ -625,7 +636,7 @@ function A:CreateSettingsPanel()
         "RateMeAlertThresholdSlider", "lowRatingThreshold",
         "Warn if community rating is at or below", 263)
 
-    local highlights = section(520, 288, "Player Rating Highlights")
+    local highlights = section(520, 323, "Player Rating Highlights")
     p.highlights, p.highlightsRow, p.highlightsLabel = checkbox(highlights, "ratingHighlights",
         "Enable rating indicators for friendly players", 19, 51,
         function() A:OnHighlightSettingsChanged() end)
@@ -636,18 +647,20 @@ function A:CreateSettingsPanel()
     p.highlightBadge, p.highlightBadgeRow, p.highlightBadgeLabel = checkbox(highlights,
         "ratingHighlightsBadge", "Show a star with the numeric rating beside nameplates", 43, 135,
         function() A:OnHighlightSettingsChanged() end)
-    rule(highlights, 172)
+    p.highlightChat, p.highlightChatRow, p.highlightChatLabel = checkbox(highlights,
+        "ratingHighlightsChat", "Show a star with the rating before chat messages", 43, 170)
+    rule(highlights, 207)
     p.highlightPersonal, p.highlightPersonalRow, p.highlightPersonalLabel = checkbox(highlights,
-        "ratingHighlightsPersonal", "Use ratings I personally gave players", 43, 182,
+        "ratingHighlightsPersonal", "Use ratings I personally gave players", 43, 217,
         function() A:OnHighlightSettingsChanged() end)
     p.highlightCommunity, p.highlightCommunityRow, p.highlightCommunityLabel = checkbox(highlights,
-        "ratingHighlightsCommunity", "Use recent verified community ratings", 43, 217,
+        "ratingHighlightsCommunity", "Use recent verified community ratings", 43, 252,
         function() A:OnHighlightSettingsChanged() end)
     local legend = label(highlights, "GameFontHighlightSmall",
-        "Badge: community first, then personal.  Gold: 4.0+   Red: below 2.0", 47, -261, 610)
+        "Stars: community first, then personal.  Gold: 4.0+   Red: below 2.0", 47, -296, 610)
     legend:SetTextColor(unpack(MUTED))
 
-    local party = section(827, 109, "Post-Party Ratings")
+    local party = section(862, 109, "Post-Party Ratings")
     p.partyReviewPrompt, p.partyReviewPromptRow, p.partyReviewPromptLabel = checkbox(party,
         "partyReviewPrompt", "Open the party rating popup when I leave a party", 19, 51,
         function() if not A.db.settings.partyReviewPrompt then A.pendingPartyReview = nil end end)
@@ -655,7 +668,7 @@ function A:CreateSettingsPanel()
         "Dismiss with Escape. Reopen the last party with /rateme party.", 55, -84, 545)
     partyHint:SetTextColor(unpack(MUTED))
 
-    local minimap = section(955, 109, "Minimap Button")
+    local minimap = section(990, 109, "Minimap Button")
     p.minimapVisible, p.minimapVisibleRow, p.minimapVisibleLabel = checkbox(minimap,
         "minimapVisible", "Show the movable Rate Me! button on my minimap", 19, 51,
         function() A:SetMinimapVisible(A.db.settings.minimapVisible) end)
@@ -663,17 +676,22 @@ function A:CreateSettingsPanel()
         "Left-click: open     Left-drag: move     /rateme: always available", 55, -84, 545)
     miniHint:SetTextColor(unpack(MUTED))
 
-    local communication = section(1083, 220, "Communication")
+    local communication = section(1118, 267, "Communication")
     p.sendRatingBroadcasts = checkbox(communication, "sendRatingBroadcasts",
         "Announce my new, edited and removed ratings to other users", 19, 42,
         function() A:OnCommunicationSettingsChanged() end)
     p.receiveRatingBroadcasts = checkbox(communication, "receiveRatingBroadcasts",
         "Receive and save rating announcements from other users", 19, 77,
         function() A:OnCommunicationSettingsChanged() end)
-    label(communication, "GameFontHighlightSmall", "Maximum direct peers per lookup", 55, -120, 390)
-    p.lookupPeerValue = label(communication, "GameFontNormal", "", 460, -120, 150, "RIGHT")
+    -- Hovering over a player only asks other users when this is on.
+    p.lookupOnHover = checkbox(communication, "lookupOnHover",
+        "Look up community ratings when I hover over players", 19, 112)
+    -- A divider keeps the unrelated peer-count slider apart from the checkboxes.
+    p.communicationRule = rule(communication, 152)
+    label(communication, "GameFontHighlightSmall", "Maximum direct peers per lookup", 55, -167, 390)
+    p.lookupPeerValue = label(communication, "GameFontNormal", "", 460, -167, 150, "RIGHT")
     p.lookupPeerCount = CreateFrame("Slider", "RateMeLookupPeerCount", communication, "OptionsSliderTemplate")
-    p.lookupPeerCount:SetPoint("TOPLEFT", communication, "TOPLEFT", 61, -148)
+    p.lookupPeerCount:SetPoint("TOPLEFT", communication, "TOPLEFT", 61, -195)
     p.lookupPeerCount:SetSize(340, 19)
     p.lookupPeerCount:SetMinMaxValues(1, 20)
     p.lookupPeerCount:SetValueStep(1)
@@ -691,26 +709,31 @@ function A:CreateSettingsPanel()
         p.lookupPeerValue:SetText(tostring(rounded))
     end)
     local networkHint = label(communication, "GameFontDisableSmall",
-        "Peers may forward lookups. Broadcast reach depends on available game channels.", 55, -190, 580)
+        "Peers may forward lookups. Broadcast reach depends on available game channels.", 55, -237, 580)
 
-    local diagnostics = section(1323, 90, "Diagnostics")
+    local diagnostics = section(1405, 90, "Diagnostics")
     p.debug, p.debugRow, p.debugLabel = checkbox(diagnostics,
         "debug", "Show rating and peer-to-peer activity in chat (debug)", 19, 51)
 
-    local reset = section(1433, 98, "Reset")
+    local reset = section(1515, 98, "Reset")
     p.resetDefaults = button(reset, "Reset to Default", 160, 26, 19, -46, function()
         A:ConfirmResetToDefaults()
     end)
     local resetHint = label(reset, "GameFontHighlightSmall",
         "Restores every setting and all window positions and sizes. Your ratings are kept.",
         190, -52, 470, "LEFT")
+    -- Centre the note vertically on the button, just to its right.
+    resetHint:ClearAllPoints()
+    resetHint:SetPoint("LEFT", p.resetDefaults, "RIGHT", 24, 0)
+    if resetHint.SetJustifyV then resetHint:SetJustifyV("MIDDLE") end
+    p.resetHint = resetHint
     resetHint:SetTextColor(unpack(MUTED))
 
     -- Preserve original controls/aliases for any current callers or testing.
     for _, name in ipairs({"enabled", "alertPersonal", "alertCommunity", "threshold", "thresholdValue",
         "personalThreshold", "personalThresholdValue", "highlights", "highlightGlow", "highlightBadge",
-        "highlightPersonal", "highlightCommunity", "minimapVisible", "partyReviewPrompt",
-        "allCharacters", "confirmRemoveRating", "debug"}) do
+        "highlightPersonal", "highlightCommunity", "highlightChat", "minimapVisible", "partyReviewPrompt",
+        "allCharacters", "confirmRemoveRating", "lookupOnHover", "debug"}) do
         scroll[name] = p[name]
     end
     self.main.settingsPanel = scroll
@@ -767,6 +790,7 @@ function A:DrawSettings()
     p.debug:SetChecked(settings.debug)
     p.sendRatingBroadcasts:SetChecked(settings.sendRatingBroadcasts)
     p.receiveRatingBroadcasts:SetChecked(settings.receiveRatingBroadcasts)
+    p.lookupOnHover:SetChecked(settings.lookupOnHover)
     p.lookupPeerCount:SetValue(settings.lookupPeerCount or 7)
     p.lookupPeerValue:SetText(tostring(settings.lookupPeerCount or 7))
     p.enabled:SetChecked(settings.lowRatingAlerts)
@@ -775,6 +799,7 @@ function A:DrawSettings()
     p.highlights:SetChecked(settings.ratingHighlights)
     p.highlightGlow:SetChecked(settings.ratingHighlightsGlow)
     p.highlightBadge:SetChecked(settings.ratingHighlightsBadge)
+    p.highlightChat:SetChecked(settings.ratingHighlightsChat)
     p.highlightPersonal:SetChecked(settings.ratingHighlightsPersonal)
     p.highlightCommunity:SetChecked(settings.ratingHighlightsCommunity)
     p.minimapVisible:SetChecked(settings.minimapVisible)
@@ -790,8 +815,9 @@ function A:DrawSettings()
     dependent(p.alertCommunity, p.alertCommunityRow, p.alertCommunityLabel, settings.lowRatingAlerts)
     dependent(p.highlightGlow, p.highlightGlowRow, p.highlightGlowLabel, settings.ratingHighlights)
     dependent(p.highlightBadge, p.highlightBadgeRow, p.highlightBadgeLabel, settings.ratingHighlights)
+    dependent(p.highlightChat, p.highlightChatRow, p.highlightChatLabel, settings.ratingHighlights)
     local anyVisual = settings.ratingHighlights and
-        (settings.ratingHighlightsGlow or settings.ratingHighlightsBadge)
+        (settings.ratingHighlightsGlow or settings.ratingHighlightsBadge or settings.ratingHighlightsChat)
     dependent(p.highlightPersonal, p.highlightPersonalRow, p.highlightPersonalLabel, anyVisual)
     dependent(p.highlightCommunity, p.highlightCommunityRow, p.highlightCommunityLabel, anyVisual)
     local personalEnabled = settings.lowRatingAlerts and settings.lowRatingPersonal
@@ -1276,7 +1302,8 @@ function A:OpenEditor(target)
         return
     end
     local f = self.editor
-    f.target = {guid = target.guid, name = target.name, faction = target.faction, class = target.class}
+    f.target = {guid = target.guid, name = target.name, faction = target.faction, class = target.class,
+        fromGame = target.fromGame}
     local prior = self:GetOwnRating(f.target.guid)
     f.score = (prior and not prior.removed and prior.score) or 0
     self:SetTagSelection(f.tagControl, (prior and not prior.removed and prior.tags) or "")
@@ -1316,6 +1343,24 @@ function A:CreateReviewsWindow()
     end)
     f.refresh:ClearAllPoints()
     f.refresh:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 28, REVIEWS_HEIGHT - 508)
+    -- Reviews are shown 20 per page: at most 20 rows ever exist,
+    -- however many reviews are saved. Pager sits bottom-right, level with Refresh.
+    f.page = 1
+    f.nextPage = button(f, "Next", 95, 24, 0, 0, function()
+        f.page = f.page + 1
+        A:DrawReviews(true)
+    end)
+    f.nextPage:ClearAllPoints()
+    f.nextPage:SetPoint("TOPRIGHT", f, "BOTTOMRIGHT", -48, REVIEWS_HEIGHT - 509)
+    f.pageIndicator = label(f, "GameFontHighlightSmall", "Page 1 of 1", 0, 0, 110, "CENTER")
+    f.pageIndicator:ClearAllPoints()
+    f.pageIndicator:SetPoint("TOPRIGHT", f.nextPage, "TOPLEFT", -10, -6)
+    f.previousPage = button(f, "Previous", 95, 24, 0, 0, function()
+        f.page = math.max(1, f.page - 1)
+        A:DrawReviews(true)
+    end)
+    f.previousPage:ClearAllPoints()
+    f.previousPage:SetPoint("TOPRIGHT", f.pageIndicator, "TOPLEFT", -10, 6)
     self.reviews = f
 end
 
@@ -1378,7 +1423,10 @@ function A:CreateReviewRow(index)
     return row
 end
 
-function A:DrawReviews()
+local REVIEWS_PAGE_SIZE = 20
+
+-- pageChanged: the player moved to another page, so scroll back to the top.
+function A:DrawReviews(pageChanged)
     local f = self.reviews
     if not f or not f.target then return end
     local guid = f.target.guid
@@ -1388,6 +1436,8 @@ function A:DrawReviews()
     if summary and summary.count > 0 then
         f.status:SetText(string.format("%d recently verified / %d cached; refresh to check for updates",
             summary.freshCount or 0, summary.cachedCount or summary.count))
+    elseif summary and (summary.unverifiedCount or 0) > 0 then
+        f.status:SetText("Only unverified reviews saved; refresh to reach online reviewers")
     else
         f.status:SetText("No saved reviews; refresh to reach online reviewers")
     end
@@ -1398,11 +1448,32 @@ function A:DrawReviews()
             list[#list + 1] = {reviewer = reviewer, vote = vote}
         end
     end
+    -- Most useful first: your own review, then verified reviews,
+    -- then unverified ones; newest first within each group.
+    local ownKey = self:Key(self.myName)
+    local function group(entry)
+        if entry.reviewer == ownKey then return 0 end
+        if self:IsCommunityReviewVerified(entry.vote) then return 1 end
+        return 2
+    end
     table.sort(list, function(a, b)
+        local ga, gb = group(a), group(b)
+        if ga ~= gb then return ga < gb end
         if a.vote.date ~= b.vote.date then return a.vote.date > b.vote.date end
         return a.reviewer < b.reviewer
     end)
-    for index, entry in ipairs(list) do
+    local pageCount = math.max(1, math.ceil(#list / REVIEWS_PAGE_SIZE))
+    f.page = math.max(1, math.min(f.page or 1, pageCount))
+    local first = (f.page - 1) * REVIEWS_PAGE_SIZE + 1
+    local last = math.min(#list, f.page * REVIEWS_PAGE_SIZE)
+    f.pageIndicator:SetText(string.format("Page %d of %d", f.page, pageCount))
+    f.previousPage:SetEnabled(f.page > 1)
+    f.nextPage:SetEnabled(f.page < pageCount)
+    local shown = 0
+    for position = first, last do
+        local entry = list[position]
+        shown = shown + 1
+        local index = shown
         local row = f.rows[index] or self:CreateReviewRow(index)
         local vote = entry.vote
         row.reviewer, row.vote = entry.reviewer, vote
@@ -1428,14 +1499,17 @@ function A:DrawReviews()
         row.tagsText:SetText(ignored and "Tags hidden for this reviewer" or self:ReviewTagsText(vote.tags))
         row:Show()
     end
-    for index = #list + 1, #f.rows do f.rows[index]:Hide() end
-    f.content:SetHeight(math.max(1, #list * 117))
+    for index = shown + 1, #f.rows do f.rows[index]:Hide() end
+    f.content:SetHeight(math.max(1, shown * 117))
+    if pageChanged and f.scroller.SetVerticalScroll then f.scroller:SetVerticalScroll(0) end
 end
 
 function A:OpenReviews(target)
     if not self:ValidateStoredTarget(target) then return end
     local f = self.reviews
-    f.target = {guid = target.guid, name = target.name, faction = target.faction, class = target.class}
+    f.target = {guid = target.guid, name = target.name, faction = target.faction, class = target.class,
+        fromGame = target.fromGame}
+    f.page = 1
     self:RememberTarget(f.target)
     self:Query(f.target, false, true)
     f:Show()
@@ -1802,7 +1876,9 @@ function A:OpenPartyReview(members, testMode)
             row.loading = true
             self:SetTagSelection(row.tagControl, row.initialTags, tagCounts)
             row.loading = false
-            row.nameText:SetText(self:DisplayName(target.name))
+            -- Same "Name  •  CLASS" format as the rating window.
+            row.nameText:SetText(self:DisplayName(target.name)
+                .. (target.class and target.class ~= "" and ("  •  " .. target.class) or ""))
             local community = self:GetSummary(target.guid)
             if community and community.count and community.count > 0 then
                 row.communityText:SetText("Community: " .. self:WindowScoreText(community.average, 11)

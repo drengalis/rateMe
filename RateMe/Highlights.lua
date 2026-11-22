@@ -13,7 +13,9 @@ function A:HighlightColor(guid)
         or not self.db.settings.ratingHighlightsGlow then return nil end
     local settings = self.db.settings
     local personal = settings.ratingHighlightsPersonal and self:GetPersonalScore(guid) or nil
-    local community = settings.ratingHighlightsCommunity and self:GetFreshCommunityScore(guid) or nil
+    -- Own rating joins the community score only when both sources are chosen.
+    local community = settings.ratingHighlightsCommunity
+        and self:GetFreshCommunityScore(guid, settings.ratingHighlightsPersonal) or nil
     -- With both sources enabled, red takes precedence over gold. A neutral
     -- personal score must not conceal a low community score, or vice versa.
     if (personal and personal < 2) or (community and community < 2) then return RED end
@@ -36,7 +38,7 @@ function A:IndicatorScore(guid)
     local settings = self.db and self.db.settings
     if not settings or not settings.ratingHighlights or type(guid) ~= "string" then return nil end
     if settings.ratingHighlightsCommunity then
-        local score = self:GetFreshCommunityScore(guid)
+        local score = self:GetFreshCommunityScore(guid, settings.ratingHighlightsPersonal)
         if type(score) == "number" and score >= 1 and score <= 5 then return score, "community" end
     end
     if settings.ratingHighlightsPersonal then
@@ -434,6 +436,8 @@ end
 
 local function chatFilter(_, _, message, ...)
     if type(message) ~= "string" then return false end
+    local settings = A.db and A.db.settings
+    if not settings or not settings.ratingHighlightsChat then return false end
     local guid = select(11, ...)
     if type(guid) ~= "string" or guid == A.myGuid then return false end
     local ok, score = pcall(A.IndicatorScore, A, guid)

@@ -1,6 +1,9 @@
 local _, Communication = ...
 local A = Communication.API
-local MAX_ROUTES, MAX_SEEN, MAX_REVIEWS, MAX_SHARED_RESULTS = 32, 256, 100, 100
+-- MAX_REVIEWS caps the replies this client sends per shared lookup it answers
+-- or relays (each reply is one whisper); MAX_SHARED_RESULTS caps how many
+-- relayed reviews one of our own lookups accepts.
+local MAX_ROUTES, MAX_SEEN, MAX_REVIEWS, MAX_SHARED_RESULTS = 32, 256, 25, 100
 
 function A:PruneSharedLookups()
     for id,route in pairs(self.sharedRoutes or {}) do
@@ -28,6 +31,9 @@ end
 function A:HandleSharedLookup(args, sender)
     local id,target,hops=self.payload:SharedLookupFields(args)
     if not id or not self:ValidateStoredTarget(target) then return end
+    -- Only known peers may ask: each request makes this client send up to
+    -- MAX_REVIEWS whispers, so strangers must not be able to fill our queue.
+    if not self.data.peers[self:Key(sender)] then return end
     if not self:UnderInboundLimit(sender,"sharedLookup",6,20) then return end
     self:PruneSharedLookups()
     self.sharedLookupSeen,self.sharedRoutes=self.sharedLookupSeen or {},self.sharedRoutes or {}
@@ -75,8 +81,12 @@ function A:HandleSharedReview(args, sender)
         request.sharedAuthors=request.sharedAuthors or {}
         request.sharedCount=request.sharedCount or 0
     elseif route and route.expires>=self:Now() and route.target.guid==guid and route.children[peer] then
-        target=route.target
-        request=nil
+        -- Someone else's lookup: pass the review on towards them, but do not
+        -- save it or show it here; only our own lookups store reviews.
+        local author=self:Key(vote.sender)
+        if not author or author==self:Key(self.myName) then return end
+        if self:SendSharedReview(route,vote) then self:BumpNetworkStat("sharedReviewsRelayed") end
+        return
     else return end
     local author=self:Key(vote.sender)
     if not author or author==self:Key(self.myName) then return end
@@ -90,8 +100,7 @@ function A:HandleSharedReview(args, sender)
         accepted=self:SaveRelayedCommunityRating(target,author,vote,sender)
     end
     if not accepted then return end
-    if direct then self:RememberPeer(sender) end
-    self:RememberTarget(target)
+    if direct then self:RememberPeer(sender, "proven") end
     local cache=self.runtime.cache[guid] or {votes={}}
     cache.votes[author]=vote.score>0 and vote or nil
     cache.lastComplete=self:Stamp()
@@ -108,7 +117,6 @@ function A:HandleSharedReview(args, sender)
         request.sharedCount=request.sharedCount+1
     end
     self:SaveLookupSummary(guid,self:GetSummary(guid))
-    if route and not request then self:SendSharedReview(route,vote) end
     self:BumpNetworkStat("sharedReviewsAccepted")
     self:Debug("Saved "..(direct and "an author-verified review" or "a peer-supplied review").." by "
         ..self:DisplayName(vote.sender).." for "..self:DisplayName(target.name)..".")

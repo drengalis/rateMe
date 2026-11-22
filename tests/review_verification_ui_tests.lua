@@ -28,7 +28,8 @@ assert(loadfile('RateMe/UI.lua'))('RateMe',a)
 function a:ScoreText()return '5' end
 function a:WindowScoreText()return '5' end
 function a:DateText(n)return 'LOCAL '..tostring(n)..' PM' end
-a.reviews={target={guid='Player-target',name='Target'},rows={},content=widget(),targetText=widget(),ratingText=widget(),status=widget()}
+a.reviews={target={guid='Player-target',name='Target'},rows={},content=widget(),targetText=widget(),ratingText=widget(),status=widget(),
+ pageIndicator=widget(),previousPage=widget(),nextPage=widget(),scroller=widget(),page=1}
 local vote={sender='Alice',score=5,date=100,verifiedAt=200}
 a.runtime.cache['Player-target']={votes={alice=vote}}
 a:DrawReviews()

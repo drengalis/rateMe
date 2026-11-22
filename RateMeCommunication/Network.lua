@@ -3,6 +3,13 @@ local A = Communication.API
 
 local PREFIX = "RATEME"
 local MAX_QUEUE = 360
+-- Rating announcements (B and broadcast T packets) are "bulk": they always wait
+-- behind lookups, replies and discovery, and may only fill part of the queue,
+-- so announcing a rating can never delay or crowd out lookups.
+local MAX_BULK_QUEUE = 120
+local function isBulk(message)
+    return message:sub(1, 2) == "B|" or message:sub(1, 6) == "T|1|-|"
+end
 local MAX_HOPS = 2
 local MAX_FANOUT = 3
 local INITIAL_QUERY_SEEDS = 3
@@ -54,23 +61,57 @@ function A:QueueSend(message, channel, target, logged)
         target = self:CleanName(target)
         if not target or self:Key(target) == self:Key(self.myName) then return false end
     end
-    if #self.outbox >= MAX_QUEUE then
+    local bulk = isBulk(message)
+    local bulkCount = 0
+    for _, job in ipairs(self.outbox) do if job.bulk then bulkCount = bulkCount + 1 end end
+    if bulk and bulkCount >= MAX_BULK_QUEUE then
         self:BumpNetworkStat("droppedQueue")
         self:DebugPacket("DROP/queue", message, channel, target)
         return false
     end
-    self.outbox[#self.outbox + 1] = {
+    if #self.outbox >= MAX_QUEUE then
+        -- A full queue makes room for lookups and replies by dropping the
+        -- newest announcement; announcements never displace anything.
+        local victim
+        if not bulk then
+            for index = #self.outbox, 1, -1 do
+                if self.outbox[index].bulk then victim = index; break end
+            end
+        end
+        if not victim then
+            self:BumpNetworkStat("droppedQueue")
+            self:DebugPacket("DROP/queue", message, channel, target)
+            return false
+        end
+        local dropped = table.remove(self.outbox, victim)
+        self:BumpNetworkStat("droppedQueue")
+        self:DebugPacket("DROP/queue", dropped.message, dropped.channel, dropped.target)
+    end
+    local job = {
         message = message, channel = channel, target = target, logged = logged,
-        due = self:Now(), retries = 0,
+        due = self:Now(), retries = 0, bulk = bulk,
     }
+    local at = #self.outbox + 1
+    if not bulk then
+        -- Lookups, replies and discovery go ahead of every waiting announcement.
+        for index, queued in ipairs(self.outbox) do
+            if queued.bulk then at = index; break end
+        end
+    end
+    table.insert(self.outbox, at, job)
     return true
 end
 
 function A:FlushMessages()
     if #self.outbox == 0 or self:Now() < self.nextSend then return end
-    local job = self.outbox[1]
-    if self:Now() < job.due then return end
-    table.remove(self.outbox, 1)
+    -- Send the first message that is due. A message waiting to be retried
+    -- (WoW held it back) must not hold up everything queued behind it.
+    local index
+    for i, queued in ipairs(self.outbox) do
+        if self:Now() >= queued.due then index = i; break end
+    end
+    if not index then return end
+    local job = table.remove(self.outbox, index)
     if (job.message:sub(1,2)=="B|" or job.message:sub(1,6)=="T|1|-|")
         and self.db.settings.sendRatingBroadcasts == false then return end
     local fn = job.logged and C_ChatInfo.SendAddonMessageLogged or C_ChatInfo.SendAddonMessage
@@ -157,23 +198,37 @@ function A:PruneInbound()
     end
 end
 
--- Rotate through recently confirmed peers to avoid all clients querying the same
--- most-recently-seen three contacts. 'used' is retained across query waves.
+-- Choose peers for a lookup wave or a forwarded request: friends
+-- and guildmates first, then proven peers, with about a quarter of the spots
+-- kept for newcomers so the network can still grow. Within each tier the
+-- starting point rotates per request, so lookups spread across peers.
+-- 'used' (keys already asked) is retained across query waves.
 function A:SelectQueryPeers(id, exclude, origin, maximum, used)
-    local choices = self:PeerNames(nil, 120)
     local result = {}
-    if #choices == 0 then return result end
-    local offset = stableHash(id .. ":" .. (self.myName or "")) % #choices
-    local excluded = self:Key(exclude)
-    local original = self:Key(origin)
-    for i = 1, #choices do
-        local peer = choices[((offset + i - 1) % #choices) + 1]
-        local key = self:Key(peer)
-        if key and key ~= excluded and key ~= original and not (used and used[key]) then
-            result[#result + 1] = peer
-            if #result >= maximum then break end
+    if not maximum or maximum <= 0 then return result end
+    local excluded, original = self:Key(exclude), self:Key(origin)
+    local tiers = {{}, {}, {}}
+    for _, peer in ipairs(self:RankedPeers(nil)) do
+        if peer.key ~= excluded and peer.key ~= original and not (used and used[peer.key]) then
+            local list = tiers[peer.tier]
+            list[#list + 1] = peer.name
         end
     end
+    local offset = stableHash(id .. ":" .. (self.myName or ""))
+    local function rotated(list)
+        local out = {}
+        for i = 1, #list do out[i] = list[((offset + i - 1) % #list) + 1] end
+        return out
+    end
+    local established = rotated(tiers[1])
+    for _, name in ipairs(rotated(tiers[2])) do established[#established + 1] = name end
+    local newcomers = rotated(tiers[3])
+    local newcomerSlots = math.min(#newcomers, math.max(1, math.floor(maximum / 4)))
+    local establishedSlots = math.min(#established, maximum - newcomerSlots)
+    -- Fill any spots one group cannot use from the other.
+    newcomerSlots = math.min(#newcomers, maximum - establishedSlots)
+    for i = 1, establishedSlots do result[#result + 1] = established[i] end
+    for i = 1, newcomerSlots do result[#result + 1] = newcomers[i] end
     return result
 end
 
@@ -477,7 +532,8 @@ function A:HandleRating(args, sender)
     end
     -- Only a validated direct reviewer response establishes peer reachability;
     -- arbitrary unsolicited R packets must not populate the peer directory.
-    self:RememberPeer(sender)
+    -- A real reply to our lookup makes the sender a proven peer.
+    self:RememberPeer(sender, "proven")
     self:BumpNetworkStat("repliesAccepted")
     if self.db and self.db.settings and self.db.settings.debug then
         if score == 0 then
@@ -522,7 +578,7 @@ function A:OnMessage(prefix, message, channel, sender, logged)
         -- Fresh v1 discovery may be a peer that downgraded or restarted;
         -- require it to advertise higher capabilities again before upgrading.
         self.payload:ForgetPeer(canonical)
-        self:RememberPeer(canonical)
+        self:RememberPeer(canonical, "greeting")
         if not recently then
             self:SetPeerHello(canonical, self:Stamp())
             -- Guild-wide discovery is receive-only for most recipients: otherwise
@@ -544,7 +600,7 @@ function A:OnMessage(prefix, message, channel, sender, logged)
         end
     elseif tag == "A" and channel == "WHISPER" and args and args[2] == self.protocol then
         self.payload:ForgetPeer(canonical)
-        self:RememberPeer(canonical)
+        self:RememberPeer(canonical, "greeting")
         self:SendCapabilities(canonical)
     elseif tag == "K" and channel == "WHISPER" then
         -- A direct, validated capability advertisement prompts one bounded

@@ -33,8 +33,11 @@ local function save(a,author,score,rev,tags)
 end
 assert(middle:SaveOwnRating(target,4,{1,4}))
 save(middle,'Alice-Realm',5,1,{1,7})
-for i=1,5 do save(remote,'Reviewer'..i..'-Realm',i,1,{1})end
+-- Real character names have letters only: Reviewera..Reviewere.
+for i=1,5 do save(remote,'Reviewer'..string.char(96+i)..'-Realm',i,1,{1})end
 middle:RememberPeer(remote.myName)
+-- Shared lookups are answered only for known peers.
+middle:RememberPeer(root.myName);remote:RememberPeer(middle.myName)
 local function request(id)
  root.runtime.requests[id]={target=target,guid=target.guid,expires=100,votes={},revisions={},
   responseCount=0,seeded={[root:Key(middle.myName)]=true}}
@@ -58,26 +61,31 @@ local function drain()
  error('unbounded relay loop')
 end
 request('aa-1');drain()
-assert(root:GetSummary(target.guid).count==7)
-assert(root:GetSummary(target.guid).peerCount==6)
+-- All 7 reviews arrive, but only the middle player's own (received directly) is
+-- verified; the 6 passed-along copies are listed but not averaged.
+assert(root:GetSummary(target.guid).count==1 and root:GetSummary(target.guid).average==4)
+assert(root:GetSummary(target.guid).unverifiedCount==6 and root:GetSummary(target.guid).peerCount==6)
+local listed=0;for _ in pairs(root.runtime.cache[target.guid].votes) do listed=listed+1 end
+assert(listed==7,'every review is still listed')
 local votes=root.db.community[target.guid].votes
 assert(root:IsCommunityReviewVerified(votes['middle-realm']))
-assert(votes['reviewer1-realm'].via=='Middle-Realm' and not root:IsCommunityReviewVerified(votes['reviewer1-realm']))
-assert(middle.db.community[target.guid].votes['reviewer1-realm'].via=='Remote-Realm')
-assert(votes['reviewer1-realm'].tags==root:EncodeReviewTags({1}))
+assert(votes['reviewera-realm'].via=='Middle-Realm' and not root:IsCommunityReviewVerified(votes['reviewera-realm']))
+-- The middle player only forwards for root's lookup: it passes reviews on but keeps none.
+assert(middle.db.community[target.guid].votes['reviewera-realm']==nil,'forwarding peer must not save relayed reviews')
+assert(votes['reviewera-realm'].tags==root:EncodeReviewTags({1}))
 local score,count=root:GetFreshCommunityScore(target.guid)
 assert(score==4 and count==1) -- peer-supplied scores never drive fresh-only indicators
 root:FinishQuery('aa-1')
-assert(root:GetSummary(target.guid).count==7)
+assert(root:GetSummary(target.guid).count==1 and root:GetSummary(target.guid).unverifiedCount==6)
 -- Shared tombstones merge through two hops and prevent stale peer resurrection.
-save(remote,'Reviewer1-Realm',0,2,{})
+save(remote,'Reviewera-Realm',0,2,{})
 request('aa-2');drain()
-assert(root.db.community[target.guid].votes['reviewer1-realm'].score==0)
-assert(root.runtime.cache[target.guid].votes['reviewer1-realm']==nil)
-assert(root:GetSummary(target.guid).count==6)
-local stale={sender='Reviewer1-Realm',score=5,rev=1,date=1800000001,tags='B'}
+assert(root.db.community[target.guid].votes['reviewera-realm'].score==0)
+assert(root.runtime.cache[target.guid].votes['reviewera-realm']==nil)
+assert(root:GetSummary(target.guid).count==1 and root:GetSummary(target.guid).unverifiedCount==5)
+local stale={sender='Reviewera-Realm',score=5,rev=1,date=1800000001,tags='B'}
 root:OnMessage('RATEME',root.payload:SharedReview('aa-2',target.guid,stale),'WHISPER',middle.myName,false)
-assert(root.db.community[target.guid].votes['reviewer1-realm'].score==0)
+assert(root.db.community[target.guid].votes['reviewera-realm'].score==0)
 -- Unsolicited responses, wrong children, expired routes and invalid fields do not persist.
 local outsider={sender='Outsider-Realm',score=1,rev=1,date=1800000001,tags='B'}
 root:OnMessage('RATEME',root.payload:SharedReview('aa-2',target.guid,outsider),'WHISPER',remote.myName,false)
@@ -90,20 +98,20 @@ root:OnMessage('RATEME',root.payload:SharedReview('aa-2',target.guid,forged),'WH
 assert(root.db.community[target.guid].votes['alice-realm'].rev==1)
 assert(root:IsCommunityReviewVerified(root.db.community[target.guid].votes['alice-realm']))
 -- The actual author can correct even a larger, unverified peer revision.
-forged.sender='Reviewer2-Realm'
+forged.sender='Reviewerb-Realm'
 root:OnMessage('RATEME',root.payload:SharedReview('aa-2',target.guid,forged),'WHISPER',middle.myName,false)
-assert(root.db.community[target.guid].votes['reviewer2-realm'].rev==999)
-root:HandleRating({'R','aa-2',target.guid,'4','1','1800000001','0'},'Reviewer2-Realm')
-assert(root.db.community[target.guid].votes['reviewer2-realm'].rev==1)
+assert(root.db.community[target.guid].votes['reviewerb-realm'].rev==999)
+root:HandleRating({'R','aa-2',target.guid,'4','1','1800000001','0'},'Reviewerb-Realm')
+assert(root.db.community[target.guid].votes['reviewerb-realm'].rev==1)
 root:FinishQuery('aa-2')
-assert(root.runtime.cache[target.guid].votes['reviewer2-realm'].score==4)
-assert(root:IsCommunityReviewVerified(root.runtime.cache[target.guid].votes['reviewer2-realm']))
+assert(root.runtime.cache[target.guid].votes['reviewerb-realm'].score==4)
+assert(root:IsCommunityReviewVerified(root.runtime.cache[target.guid].votes['reviewerb-realm']))
 -- A forwarded copy of this client's own review must never be endorsed automatically.
 assert(not root:SaveRelayedCommunityRating(target,root:Key(root.myName),{sender=root.myName,score=5,rev=99,date=1},middle.myName))
 -- Per-lookup forwarded-review cap is independent of the existing direct-review cap.
 request('aa-3');middle.outbox={}
 for i=1,120 do
- local v={sender='Extra'..i..'-Realm',score=3,rev=1,date=1800000001,tags=''}
+ local v={sender='Extra'..string.char(96+math.floor((i-1)/26)+1)..string.char(97+(i-1)%26)..'-Realm',score=3,rev=1,date=1800000001,tags=''}
  local _,_,args=root:DecodePacket(root.payload:SharedReview('aa-3',target.guid,v),middle.myName)
  root:HandleSharedReview(args,middle.myName)
 end
@@ -122,7 +130,7 @@ assert(next(middle.sharedRoutes)==nil and next(middle.sharedLookupSeen)==nil)
 -- Persistence retains provenance; it never carries direct verification to another user.
 RateMeDB=root.db
 local restored=boot(root.myName)
-assert(restored.db.community[target.guid].votes['reviewer3-realm'].via=='Middle-Realm')
-assert(not restored:IsCommunityReviewVerified(restored.db.community[target.guid].votes['reviewer3-realm']))
+assert(restored.db.community[target.guid].votes['reviewerc-realm'].via=='Middle-Realm')
+assert(not restored:IsCommunityReviewVerified(restored.db.community[target.guid].votes['reviewerc-realm']))
 assert(restored:GetFreshCommunityScore(target.guid)==nil)
 print('PASS: multi-peer aggregation, deduplication, tags, tombstones, source verification, author correction, route validation, caps and persistence')

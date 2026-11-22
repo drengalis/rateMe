@@ -11,7 +11,7 @@ end
 C_Timer={After=function()end,NewTicker=function()end}
 function IsInInstance()return false,'none' end
 local settings={ratingHighlights=true,ratingHighlightsGlow=true,ratingHighlightsBadge=false,
- ratingHighlightsPersonal=true,ratingHighlightsCommunity=true}
+ ratingHighlightsPersonal=true,ratingHighlightsCommunity=true,ratingHighlightsChat=true}
 local community,personal={},{}
 local A={db={settings=settings},myGuid='Player-ME-1'}
 function A:Now()return 0 end
@@ -64,3 +64,12 @@ settings.ratingHighlights=true;settings.ratingHighlightsCommunity=false
 assert(select(2,say('community off','Player-A-1'))==nil,'community source off')
 _,message=say('personal on','Player-B-1');assert(message:find('5.0',1,true),'personal source still on')
 print('PASS: personal fallback; unrated, own, missing-GUID and disabled cases untouched')
+
+-- The chat star has its own setting; turning it off leaves chat untouched.
+settings.ratingHighlightsCommunity=true
+assert(select(2,say('on','Player-A-1')),'stars shown with the setting on')
+settings.ratingHighlightsChat=false
+assert(say('off','Player-A-1')==false and select(2,say('off','Player-A-1'))==nil,'no stars with the chat setting off')
+assert(select(2,say('off','Player-B-1'))==nil,'not for personal ratings either')
+settings.ratingHighlightsChat=true
+print('PASS: chat stars follow their own setting')

@@ -21,6 +21,7 @@ local function frame(kind,name,parent)
  function x:SetWidth(w) self.width=w end
  function x:SetHeight(h) self.height=h end
  function x:SetPoint(...) self.point={...};self.points=self.points or {};self.points[#self.points+1]={...} end
+ function x:ClearAllPoints() self.point=nil;self.points={} end
  function x:SetText(t) self.text=t end
  function x:SetTextColor(...) self.textColor={...} end
  function x:SetJustifyH(t)self.justify=t end
@@ -61,7 +62,7 @@ local chunk=assert(loadfile('RateMe/UI.lua'))
 chunk('RateMe', A)
 A:CreateSettingsPanel()
 local p=A.main.settingsPanel.content
-assert(p.height==1542 and p.width==699)
+assert(p.height==1624 and p.width==699)
 assert(A.main.settingsPanel.scrollChild==p)
 assert(p.enabled and p.alertPersonal and p.alertCommunity and p.threshold and p.personalThreshold)
 assert(p.highlights and p.highlightGlow and p.highlightBadge and p.highlightPersonal and p.highlightCommunity and p.minimapVisible and p.partyReviewPrompt and p.allCharacters and p.debug)
@@ -120,6 +121,15 @@ p.highlightGlow:SetChecked(false);p.highlightGlow.scripts.OnClick(p.highlightGlo
 assert(A.db.settings.ratingHighlightsGlow==false and p.highlightPersonal.enabled)
 p.highlightBadge:SetChecked(false);p.highlightBadge.scripts.OnClick(p.highlightBadge)
 assert(p.highlightPersonal.enabled==false and p.highlightCommunity.enabled==false)
+-- Chat stars have their own checkbox; on their own they keep the rating sources enabled.
+assert(p.highlightChat and p.highlightChat.enabled,'chat-star checkbox enabled under the main switch')
+p.highlightChat:SetChecked(true);p.highlightChat.scripts.OnClick(p.highlightChat)
+assert(A.db.settings.ratingHighlightsChat==true and p.highlightPersonal.enabled and p.highlightCommunity.enabled)
+p.highlightChat:SetChecked(false);p.highlightChat.scripts.OnClick(p.highlightChat)
+assert(A.db.settings.ratingHighlightsChat==false and p.highlightPersonal.enabled==false)
+p.highlights:SetChecked(false);p.highlights.scripts.OnClick(p.highlights)
+assert(p.highlightChat.enabled==false,'chat-star checkbox dims when indicators are off')
+p.highlights:SetChecked(true);p.highlights.scripts.OnClick(p.highlights)
 p.minimapVisible:SetChecked(false);p.minimapVisible.scripts.OnClick(p.minimapVisible)
 assert(not A.db.settings.minimapVisible)
 assert(counters.alert>=3 and counters.highlights>=1)
@@ -156,3 +166,13 @@ assert(A.db.settings.lookupPeerCount==12 and p.lookupPeerCount.value==12 and p.l
 p.lookupPeerCount:SetValue(100)
 assert(A.db.settings.lookupPeerCount==20 and p.lookupPeerCount.value==20)
 print('PASS: communication checkboxes and normalized peer-count slider')
+-- The peer-count slider is set apart from the Communication checkboxes by a divider.
+local communicationRule=p.communicationRule
+assert(communicationRule and communicationRule.height==1,'Communication divider missing')
+local ruleY=communicationRule.points[1][5]
+assert(ruleY<-112-30 and ruleY>-167,'divider sits between the last checkbox and the slider label')
+print('PASS: divider separates the Communication checkboxes from the peer-count slider')
+-- The Reset note is centred vertically on the Reset to Default button.
+assert(p.resetHint.point[1]=='LEFT' and p.resetHint.point[2]==p.resetDefaults and p.resetHint.point[3]=='RIGHT'
+    and p.resetHint.point[5]==0, 'Reset note must be centred on the button')
+print('PASS: Reset note centred on its button')

@@ -21,7 +21,7 @@ function A:SaveOwnRating(target, score, tags)
     local records = self:OwnRatings()
     local prior = records[target.guid]
     records[target.guid] = {
-        guid = target.guid, name = target.name, faction = target.faction, class = target.class,
+        guid = target.guid, name = self:TrustedTargetName(target), faction = target.faction, class = target.class,
         score = score, tags = encoded, date = self:Stamp(),
         rev = (prior and tonumber(prior.rev) or 0) + 1,
     }
@@ -44,7 +44,7 @@ function A:DeleteOwnRating(target)
     local prior = records[target.guid]
     if not prior then return false end
     records[target.guid] = {
-        guid = target.guid, name = target.name, faction = target.faction, class = target.class,
+        guid = target.guid, name = self:TrustedTargetName(target), faction = target.faction, class = target.class,
         removed = true, score = 0, tags = "", date = self:Stamp(),
         rev = (tonumber(prior.rev) or 0) + 1,
     }

@@ -9,6 +9,7 @@ local Payload = {}
 Payload.__index = Payload
 local MAX_PACKET_BYTES = 255
 local MAX_CODEC_VERSION = 16
+local MAX_FUTURE_SECONDS = 86400
 
 local function fields(value, limit)
     local out, start = {}, 1
@@ -21,6 +22,20 @@ local function fields(value, limit)
     out[#out + 1] = value:sub(start)
     return out
 end
+
+-- Names received from other players must look like a real character name:
+-- "First-Second" (second part: realm, or surname on WoW Forever), letters only
+-- (accented letters allowed; apostrophes in the second part), sensible lengths.
+-- Anything else is rejected before it can be stored or shown.
+local function plausibleName(name)
+    if type(name) ~= "string" then return nil end
+    local first, second = name:match("^([^%-]+)%-([^%-]+)$")
+    if not first then return nil end
+    if #first < 2 or #first > 24 or not first:match("^[%a\128-\255]+$") then return nil end
+    if #second < 2 or #second > 48 or not second:match("^[%a\128-\255']+$") then return nil end
+    return name
+end
+Payload.PlausibleName = plausibleName
 
 function Payload.new(owner)
     local self = setmetatable({owner = owner, codecs = owner.wireCodecs or {}}, Payload)
@@ -183,9 +198,12 @@ function Payload:RatingFields(args)
     if not args or #args ~= 7 then return end
     local id, guid, score, revision, timestamp, hasComment = args[2], args[3],
         tonumber(args[4]), tonumber(args[5]), tonumber(args[6]), tonumber(args[7])
+    -- Dates more than a day ahead of this client's clock are rejected:
+    -- one day allows for clock differences between players.
+    local latest = math.min(5000000000, (tonumber(self.owner:Stamp()) or 0) + MAX_FUTURE_SECONDS)
     if not score or score ~= math.floor(score) or score < 0 or score > 5
         or not revision or revision ~= math.floor(revision) or revision < 1 or revision > 100000000
-        or not timestamp or timestamp < 0 or timestamp > 5000000000
+        or not timestamp or timestamp < 0 or timestamp > latest
         or (hasComment ~= 0 and hasComment ~= 1) then return end
     return id, guid, score, revision, timestamp, hasComment
 end
@@ -211,7 +229,7 @@ end
 
 function Payload:BroadcastFields(args)
     if not args or #args ~= 11 or args[2] ~= "1" then return end
-    local reviewer, name = self.owner:CleanName(args[3]), self.owner:CleanName(args[5])
+    local reviewer, name = self.owner:CleanName(args[3]), plausibleName(self.owner:CleanName(args[5]))
     local guid, faction, class = args[4], args[6], args[7]
     if not reviewer or not name or not self:ValidGuid(guid)
         or (faction ~= "Alliance" and faction ~= "Horde")
@@ -247,7 +265,7 @@ function Payload:SharedLookup(id, target, hops)
 end
 function Payload:SharedLookupFields(args)
     if not args or #args~=8 or args[2]~="1" then return end
-    local id,guid,name,faction,class,hops=args[3],args[4],self.owner:CleanName(args[5]),args[6],args[7],tonumber(args[8])
+    local id,guid,name,faction,class,hops=args[3],args[4],plausibleName(self.owner:CleanName(args[5])),args[6],args[7],tonumber(args[8])
     if not self:ValidId(id) or not self:ValidGuid(guid) or not name
         or (faction~="Alliance" and faction~="Horde") or #class>24 or class:find("[^A-Z_]")
         or not hops or hops~=math.floor(hops) or hops<0 or hops>2 then return end
@@ -259,7 +277,7 @@ function Payload:SharedReview(id, guid, vote)
 end
 function Payload:SharedReviewFields(args)
     if not args or #args~=9 or args[2]~="1" then return end
-    local id,guid,author=args[3],args[4],self.owner:CleanName(args[5])
+    local id,guid,author=args[3],args[4],plausibleName(self.owner:CleanName(args[5]))
     if not self:ValidId(id) or not self:ValidGuid(guid) or not author then return end
     local _,_,score,rev,stamp=self:RatingFields({"R",id,guid,args[6],args[7],args[8],"0"})
     if not score then return end

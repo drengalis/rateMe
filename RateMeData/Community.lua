@@ -71,13 +71,28 @@ function A:SaveRelayedCommunityRating(target, reviewer, vote, relay)
     return true
 end
 
+-- The name to save with this player's own rating: the game's name if this
+-- target came from the game, otherwise a game-sourced name already on record,
+-- otherwise the name already on the rating; a name learned from another
+-- player is used only when nothing else is known.
+function A:TrustedTargetName(target)
+    if target.fromGame then return target.name end
+    local recent = self.data and self.data.recent and self.data.recent[target.guid]
+    if recent and recent.nameSource == "game" and recent.name then return recent.name end
+    local own = self:GetOwnRating(target.guid)
+    if own and own.name then return own.name end
+    return target.name
+end
+
 function A:CommunityReviewsForSharing(guid)
     local result={}
     local ownKey=self:Key(self.myName)
     local item=self.db.community[guid]
     if item and item.faction==self.myFaction then
+        -- Only reviews this client verified directly with their author are
+        -- passed on; unconfirmed copies stop here.
         for key,vote in pairs(item.votes) do
-            if key~=ownKey then result[key]=copyVote(vote) end
+            if key~=ownKey and self:IsCommunityReviewVerified(vote) then result[key]=copyVote(vote) end
         end
     end
     local own=self:GetOwnRating(guid)
@@ -106,11 +121,19 @@ function A:IsCommunityReviewVerified(vote)
         and vote.verifiedAt > 0 and type(vote.sender) == "string"
 end
 
+-- Names: a name the game gave us directly (target.fromGame) always wins and is
+-- marked nameSource = "game". Any other name is only used while there is no
+-- name for that ID yet; it never replaces an existing one.
 function A:RememberTarget(target)
     if not self:ValidateStoredTarget(target) then return end
     local recent = self.data.recent
     local item = recent[target.guid] or {}
-    item.guid, item.name, item.faction, item.class = target.guid, target.name, target.faction, target.class
+    if target.fromGame or not item.name then
+        item.name = target.name
+        item.nameSource = target.fromGame and "game" or item.nameSource or "network"
+    end
+    if target.fromGame or not item.class or item.class == "" then item.class = target.class end
+    item.guid, item.faction = target.guid, target.faction
     item.viewed = self:Stamp()
     recent[target.guid] = item
     local count = 0
@@ -127,11 +150,17 @@ function A:RememberTarget(target)
 end
 
 
-function A:GetFreshCommunityScore(guid)
+-- includeOwn: count this player's own rating as part of the community score.
+-- Callers pass true only when the player has chosen both sources (personal and
+-- community); with community alone, the score is other players only.
+function A:GetFreshCommunityScore(guid, includeOwn)
     local cache = self.runtime.cache[guid]
     local total, count = 0, 0
+    local ownKey = self:Key(self.myName)
     for _, vote in pairs(cache and cache.votes or {}) do
-        if (self:IsCommunityReviewVerified(vote) or self:Key(vote.sender)==self:Key(self.myName)) and vote.freshAt and self:Now() - vote.freshAt < self.CACHE_SECONDS then
+        local own = self:Key(vote.sender) == ownKey
+        if ((own and includeOwn) or (not own and self:IsCommunityReviewVerified(vote)))
+            and vote.freshAt and self:Now() - vote.freshAt < self.CACHE_SECONDS then
             total, count = total + vote.score, count + 1
         end
     end
@@ -142,21 +171,29 @@ end
 function A:GetSummary(guid)
     local cache = self.runtime.cache[guid]
     if cache then
-        local total, count, withTags, freshCount, peerCount = 0, 0, 0, 0, 0
+        -- The average and count use verified reviews and this player's own only.
+        -- Unverified (peer-supplied) reviews are still listed in Community
+        -- Reviews, but are counted separately and never averaged.
+        local total, count, withTags, freshCount, unverifiedCount = 0, 0, 0, 0, 0
+        local ownKey = self:Key(self.myName)
         for _, v in pairs(cache.votes) do
             if v.score >= 1 and v.score <= 5 then
-                total, count = total + v.score, count + 1
-                if v.via and not self:IsCommunityReviewVerified(v) then peerCount=peerCount+1 end
-                if v.tags and v.tags ~= "" then withTags = withTags + 1 end
-                if (self:IsCommunityReviewVerified(v) or self:Key(v.sender)==self:Key(self.myName)) and v.freshAt and self:Now() - v.freshAt < self.CACHE_SECONDS then
-                    freshCount = freshCount + 1
+                if self:IsCommunityReviewVerified(v) or self:Key(v.sender) == ownKey then
+                    total, count = total + v.score, count + 1
+                    if v.tags and v.tags ~= "" then withTags = withTags + 1 end
+                    if v.freshAt and self:Now() - v.freshAt < self.CACHE_SECONDS then
+                        freshCount = freshCount + 1
+                    end
+                else
+                    unverifiedCount = unverifiedCount + 1
                 end
             end
         end
         local age = self:Stamp() - (cache.lastComplete or 0)
         return { average = count > 0 and total / count or nil, count = count,
             tagged = withTags, fresh = count > 0 and freshCount == count,
-            freshCount = freshCount, cachedCount = count - freshCount, peerCount = peerCount,
+            freshCount = freshCount, cachedCount = count - freshCount,
+            unverifiedCount = unverifiedCount, peerCount = unverifiedCount,
             age = math.max(0, age), at = cache.lastComplete or 0 }
     end
     local prior = self.data.recent[guid]

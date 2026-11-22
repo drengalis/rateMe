@@ -43,7 +43,8 @@ function A:WarnForLowRating(target)
         end
     end
     if settings.lowRatingCommunity then
-        local community, count = self:GetFreshCommunityScore(target.guid)
+        -- Own rating joins the community score only when both sources are chosen.
+        local community, count = self:GetFreshCommunityScore(target.guid, settings.lowRatingPersonal)
         if community and community <= settings.lowRatingThreshold then
             triggered[#triggered + 1] = string.format("Community: %s (%d rating%s; threshold %.1f)",
                 self:StarMarkup(community, 13), count, count == 1 and "" or "s", settings.lowRatingThreshold)
@@ -129,7 +130,7 @@ function A:OnAlertSettingsChanged()
     if self.db.settings.lowRatingAlerts then
         for guid, target in pairs(self.groupMembers) do
             if self:WantsCommunityAlerts() then
-                local community = self:GetFreshCommunityScore(guid)
+                local community = self:GetFreshCommunityScore(guid, self.db.settings.lowRatingPersonal)
                 if not community then self.groupPending[guid] = target end
             else
                 self.groupPending[guid] = nil

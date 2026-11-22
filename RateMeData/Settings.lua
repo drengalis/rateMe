@@ -38,6 +38,10 @@ function A:ApplyDefaultSettings()
     -- Glow defaults on within its opt-in parent; numeric nameplate badge defaults off.
     if type(settings.ratingHighlightsGlow) ~= "boolean" then settings.ratingHighlightsGlow = true end
     if type(settings.ratingHighlightsBadge) ~= "boolean" then settings.ratingHighlightsBadge = false end
+    -- Star and score before chat messages from rated players (on, as before it was a setting).
+    if type(settings.ratingHighlightsChat) ~= "boolean" then settings.ratingHighlightsChat = true end
+    -- Hovering over a player looks up community ratings (can be turned off).
+    if type(settings.lookupOnHover) ~= "boolean" then settings.lookupOnHover = true end
     -- Ask before removing one of my ratings.
     if type(settings.confirmRemoveRating) ~= "boolean" then settings.confirmRemoveRating = true end
     -- Show a multi-player rating form after leaving a non-raid party.
