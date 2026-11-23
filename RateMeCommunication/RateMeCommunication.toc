@@ -1,6 +1,6 @@
 ## Interface: 16001
 ## Title: Rate Me! Communication
-## Notes: Peer transport, discovery, payload processing and lookup routing for Rate Me!.
+## Notes: Shares ratings with other Rate Me! users. Required by Rate Me!.
 ## Author: Rate Me! Community
 ## Version: 1
 ## Dependencies: RateMeData

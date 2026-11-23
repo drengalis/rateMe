@@ -1,6 +1,6 @@
 ## Interface: 16001
 ## Title: Rate Me!
-## Notes: Friendly player ratings, reviews, and decentralized on-demand reputation lookups for WoW Forever.
+## Notes: Rate the players you group with and see how other players have rated them.
 ## Author: Rate Me! Community
 ## Version: 1
 ## Dependencies: RateMeData, RateMeCommunication
