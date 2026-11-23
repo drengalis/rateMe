@@ -97,6 +97,26 @@ function A:TryPendingPartyReview()
     if self.db.settings.partyReviewPrompt then self:OpenPartyReview(members) end
 end
 
+-- The game closes Escape-closable windows on a loading screen (hearthstone,
+-- instance portals). Reopen the party popup afterwards with its choices kept.
+function A:OnPartyReviewLeavingWorld()
+    local f = self.partyReview
+    if not f then return end
+    local now = GetTime and GetTime()
+    self.reopenPartyReview = f:IsShown() or (now ~= nil and f.hiddenAt == now)
+end
+
+function A:OnPartyReviewEnteringWorld()
+    if not self.reopenPartyReview then return end
+    self.reopenPartyReview = nil
+    local function reopen()
+        local f = A.partyReview
+        if f and not f:IsShown() and f.members and #f.members > 0 then f:Show() end
+    end
+    -- Wait a moment in case the game closes windows again as the world appears.
+    if C_Timer and C_Timer.After then C_Timer.After(0.2, reopen) else reopen() end
+end
+
 function A:InitializePartyReviews()
     self.partyReviewState = partyState()
     self.partySession = {}
@@ -105,9 +125,15 @@ function A:InitializePartyReviews()
     local events = CreateFrame('Frame')
     events:RegisterEvent('GROUP_ROSTER_UPDATE')
     events:RegisterEvent('PLAYER_REGEN_ENABLED')
+    events:RegisterEvent('PLAYER_LEAVING_WORLD')
+    events:RegisterEvent('PLAYER_ENTERING_WORLD')
     events:SetScript('OnEvent', function(_, event)
         if event == 'PLAYER_REGEN_ENABLED' then
             A:TryPendingPartyReview()
+        elseif event == 'PLAYER_LEAVING_WORLD' then
+            A:OnPartyReviewLeavingWorld()
+        elseif event == 'PLAYER_ENTERING_WORLD' then
+            A:OnPartyReviewEnteringWorld()
         else
             A:OnPartyReviewRosterChange()
         end

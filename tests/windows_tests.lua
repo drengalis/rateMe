@@ -9,6 +9,8 @@ StaticPopupDialogs = {}
 function StaticPopup_Show(name, ...) popups[#popups+1] = {name=name, args={...}} end
 function InCombatLockdown() return false end
 C_Timer = {After=function() end, NewTicker=function() end}
+local clock = 100
+function GetTime() return clock end
 
 local function frame(kind, name, parent, template)
     local x = {kind=kind, name=name, parent=parent, template=template, scripts={}, shown=true,
@@ -36,6 +38,10 @@ local function frame(kind, name, parent, template)
     function x:StartSizing(point) self.sizing = point end
     function x:StopMovingOrSizing() self.sizing = nil end
     function x:SetScript(k, fn) self.scripts[k] = fn end
+    function x:HookScript(k, fn)
+        local old = self.scripts[k]
+        self.scripts[k] = function(...) if old then old(...) end; fn(...) end
+    end
     function x:GetName() return self.name end
     function x:SetText(t) self.text = t end
     function x:GetText() return self.text or '' end
@@ -94,6 +100,7 @@ local store = dofile('tests/load_data_addon.lua')
 store:Bind(A)
 A:InitializeStorage()
 assert(loadfile('RateMe/UI.lua'))('RateMe', A)
+assert(loadfile('RateMe/PartyReview.lua'))('RateMe', A)
 -- UI.lua defines the real minimap functions; replace them after loading.
 function A:PositionMinimapButton() counters.minimap = counters.minimap + 1 end
 function A:SetMinimapVisible(v) self.db.settings.minimapVisible = v end
@@ -227,6 +234,27 @@ local party = A.partyReview
 assert(party.rows[1].nameText.text == 'Kirikou John  •  PRIEST', 'name and class: '..tostring(party.rows[1].nameText.text))
 assert(party.rows[2].nameText.text == 'Nameless Realm', 'no class: name only')
 print('PASS: party rating window shows "Name  •  CLASS"')
+
+-- Loading screens close the party window; it comes back afterwards with the
+-- player's choices kept. Closing it yourself keeps it closed.
+local later = {}
+C_Timer.After = function(_, fn) later[#later + 1] = fn end
+local function runLater() local fns = later; later = {}; for _, fn in ipairs(fns) do fn() end end
+party.rows[1].score = 4
+clock = 200; party:Hide()                      -- the game closes it as the loading screen starts
+A:OnPartyReviewLeavingWorld()
+A:OnPartyReviewEnteringWorld(); runLater()
+assert(party:IsShown() and party.rows[1].score == 4, 'reopens after a loading screen with choices kept')
+A:OnPartyReviewLeavingWorld()                  -- still open when the world is left
+clock = 201; party:Hide()
+A:OnPartyReviewEnteringWorld(); runLater()
+assert(party:IsShown(), 'reopens when closed later in the loading screen')
+clock = 300; party:Hide()                      -- the player closes it
+clock = 400; A:OnPartyReviewLeavingWorld()
+A:OnPartyReviewEnteringWorld(); runLater()
+assert(not party:IsShown(), 'stays closed when the player closed it')
+C_Timer.After = function() end
+print('PASS: party rating window survives loading screens')
 
 -- Windows keep the "name came from the game" mark when they copy a player.
 function A:Query() return true end

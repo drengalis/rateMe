@@ -20,6 +20,7 @@ local function frame(kind,name,parent,template)
  function x:EnableMouse()end
  function x:RegisterForDrag()end
  function x:SetScript(n,v)self.scripts[n]=v end
+ function x:HookScript(n,v)local o=self.scripts[n];self.scripts[n]=function(...)if o then o(...)end;v(...)end end
  function x:Hide()self.shown=false end
  function x:Show()self.shown=true end
  function x:IsShown()return self.shown end

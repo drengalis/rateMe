@@ -1689,6 +1689,9 @@ function A:CreatePartyReviewWindow()
         end
     end)
     button(f, "Not Now", 135, 27, 1029, -514, function() f:Hide() end)
+    -- Loading screens close every Escape-closable window; the time lets the
+    -- party popup tell that apart from the player closing it.
+    f:HookScript("OnHide", function(self) self.hiddenAt = GetTime and GetTime() end)
     self.partyReview = f
 end
 
