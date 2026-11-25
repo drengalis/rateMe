@@ -2,7 +2,7 @@
 ## Title: Rate Me! Data
 ## Notes: Saves your Rate Me! ratings and settings. Required by Rate Me!.
 ## Author: Rate Me! Community
-## Version: 1
+## Version: 1.0.0
 ## SavedVariables: RateMeDB
 
 Store.lua
