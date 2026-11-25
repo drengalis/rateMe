@@ -8,6 +8,28 @@ A.STAR_FULL_TEXTURE = "Interface\\AddOns\\RateMe\\Media\\StarFull.tga"
 A.STAR_EMPTY_TEXTURE = "Interface\\AddOns\\RateMe\\Media\\StarEmpty.tga"
 A.STAR_HALF_TEXTURE = "Interface\\AddOns\\RateMe\\Media\\StarHalf.tga"
 
+-- Colour for a rating number, including decimals: red at 1, orange at 2,
+-- yellow at 3, light green at 4 and green at 5, blending smoothly in between.
+local RATING_COLORS = {
+    {1.00, 0.25, 0.20}, {1.00, 0.55, 0.15}, {1.00, 0.85, 0.20}, {0.60, 0.90, 0.25}, {0.25, 0.85, 0.30},
+}
+function A:RatingColor(score)
+    local value = math.max(1, math.min(5, tonumber(score) or 1))
+    local low = math.min(4, math.floor(value))
+    local t = value - low
+    local a, b = RATING_COLORS[low], RATING_COLORS[low + 1]
+    return a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t
+end
+
+-- A rating number such as "3.6", wrapped in its rating colour.
+function A:RatingNumberText(score)
+    local value = tonumber(score)
+    if not value then return "" end
+    local r, g, b = self:RatingColor(value)
+    return string.format("|cff%02x%02x%02x%.1f|r", math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5),
+        math.floor(b * 255 + 0.5), math.floor(value * 10 + 0.5) / 10)
+end
+
 -- Use real icons in all visible rating displays, never unsupported Unicode stars.
 -- Averages round to the nearest half star; exact stored scores remain unchanged
 -- for sorting, alerts, comparisons, and calculations.

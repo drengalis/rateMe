@@ -224,16 +224,28 @@ editor.remove.scripts.OnClick()
 assert(#removed == 4 and not confirm:IsShown(), 'no confirmation when the setting is off')
 print('PASS: remove confirmation (default on), cancel, original target, "Don\'t ask again", setting off')
 
--- The party rating window shows each player's class next to their name.
+-- The party rating window shows a round class icon before each player's name;
+-- the icon's tooltip names the class.
 A:CreatePartyReviewWindow()
 A:OpenPartyReview({
     {guid='Player-1-dd', name='Kirikou-John', class='PRIEST', faction='Alliance'},
     {guid='Player-1-ee', name='Nameless-Realm', faction='Alliance'},
 })
 local party = A.partyReview
-assert(party.rows[1].nameText.text == 'Kirikou John  •  PRIEST', 'name and class: '..tostring(party.rows[1].nameText.text))
-assert(party.rows[2].nameText.text == 'Nameless Realm', 'no class: name only')
-print('PASS: party rating window shows "Name  •  CLASS"')
+local icon = party.rows[1].nameText.classIcon
+assert(party.rows[1].nameText.text == 'Kirikou John', 'name only in text: '..tostring(party.rows[1].nameText.text))
+assert(icon and icon:IsShown() and icon.className == 'Priest', 'class icon with class name')
+assert(party.rows[1].nameText.point[4] == 23, 'name moves right to make room for the icon')
+assert(party.rows[2].nameText.text == 'Nameless Realm' and not party.rows[2].nameText.classIcon:IsShown(),
+    'no class: name only, no icon')
+assert(party.rows[2].nameText.point[4] == 12)
+local lines = {}
+GameTooltip.SetOwner = GameTooltip.SetOwner or function() end
+GameTooltip.Show = GameTooltip.Show or function() end
+GameTooltip.AddLine = function(_, text) lines[#lines + 1] = text end
+icon.scripts.OnEnter(icon)
+assert(lines[1] == 'Priest', 'icon tooltip names the class')
+print('PASS: party rating window shows "<class icon> Name" with a class tooltip')
 
 -- Loading screens close the party window; it comes back afterwards with the
 -- player's choices kept. Closing it yourself keeps it closed.

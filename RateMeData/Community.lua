@@ -168,8 +168,26 @@ function A:GetFreshCommunityScore(guid, includeOwn)
 end
 
 
+-- The lookup currently running for a player, if any.
+function A:RunningLookup(guid)
+    for _, request in pairs(self.runtime and self.runtime.requests or {}) do
+        if request.guid == guid and request.expires > self:Now() then return request end
+    end
+end
+
+-- While a lookup runs, its replies count straight away instead of only when
+-- the lookup finishes; checking/replies tell the windows it is still going.
 function A:GetSummary(guid)
     local cache = self.runtime.cache[guid]
+    local running = self:RunningLookup(guid)
+    if running then
+        local votes = {}
+        for key, vote in pairs(cache and cache.votes or {}) do votes[key] = vote end
+        for key, revision in pairs(running.revisions) do votes[key] = running.votes[key] end
+        local ownKey = self:Key(self.myName)
+        if running.votes[ownKey] then votes[ownKey] = running.votes[ownKey] end
+        cache = {votes = votes, lastComplete = cache and cache.lastComplete}
+    end
     if cache then
         -- The average and count use verified reviews and this player's own only.
         -- Unverified (peer-supplied) reviews are still listed in Community
@@ -194,7 +212,8 @@ function A:GetSummary(guid)
             tagged = withTags, fresh = count > 0 and freshCount == count,
             freshCount = freshCount, cachedCount = count - freshCount,
             unverifiedCount = unverifiedCount, peerCount = unverifiedCount,
-            age = math.max(0, age), at = cache.lastComplete or 0 }
+            age = math.max(0, age), at = cache.lastComplete or 0,
+            checking = running and true or nil, replies = running and running.responseCount or nil }
     end
     local prior = self.data.recent[guid]
     if prior and prior.checked and prior.checked > 0 then

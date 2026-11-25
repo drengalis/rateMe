@@ -23,11 +23,14 @@ local a=boot()
 local labels={
  [1]='Leader',[2]='Team Player',[3]='Helpful',[4]='Skilled',[5]='Reliable',[6]='Patient',
  [7]='Fair Looter',[8]='Good Communicator',[9]='Well Prepared',[10]='Knows Mechanics',
- [11]='Protects Teammates',[12]='Good Sportsmanship',[33]='Ninja Looter',[34]='Toxic',
+ [11]='Uses Crowd Control',[12]='Good Sportsmanship',[13]='Shares Resources',[14]='Responsive',
+ [15]='Careful Pulls',[33]='Ninja Looter',[34]='Toxic',
  [35]='Griefer',[36]='Frequently AFK',[37]='Abandons Groups',[38]='Uncooperative',
  [39]='Ignores Mechanics',[40]='Reckless Pulls',[41]='Unprepared',[42]='Poor Communication',
- [43]='Breaks Crowd Control',[44]='Disrespects Loot Rules',
- [13]='Shares Resources',[45]='Resource Hog'}
+ [43]='Ignores Crowd Control',[44]='Disrespects Loot Rules',[45]='Resource Hog',
+ [46]='Poor Leadership',[47]='Elitist',[48]='Underperforms',[49]='Impatient'}
+-- Retired tags stay registered for old reviews but are never offered.
+assert(a.TAG_REGISTRY[35].retired and a.TAG_REGISTRY[44].retired)
 for id,name in pairs(labels)do
  assert(a.TAG_REGISTRY[id].name==name,'Permanent ID changed: '..id)
  assert(a.TAG_REGISTRY[id].positive==(id<33))
@@ -35,8 +38,9 @@ end
 assert(a:EncodeReviewTags({1,7,40})=='BHo') -- permanent byte mapping
 assert(a:EncodeReviewTags({40,7,1})=='BHo')
 assert(a:EncodeReviewTags(nil)=='')
--- 14 is an unassigned ID; 13/45 are the Shares Resources/Resource Hog opposites.
-for _,invalid in ipairs({{1,1},{0},{14},{1,2,3,4},{7,33},{9,41},{13,45},'free text','!!!!'})do
+-- 16 is an unassigned ID; every positive tag conflicts with its negative opposite.
+for _,invalid in ipairs({{1,1},{0},{16},{1,2,3,4},{7,33},{9,41},{13,45},{1,46},{3,47},{4,48},
+  {5,37},{6,49},{11,43},{14,36},{15,40},'free text','!!!!'})do
  assert(a:EncodeReviewTags(invalid)==nil)
 end
 local target={guid='Player-1-bb',name='Target-Realm',faction='Alliance',class='MAGE'}
@@ -83,3 +87,15 @@ b:HandleQuery({'Q','ab-2',target.guid,'Requester-Realm','0'},'Requester-Realm')
 assert(#b.outbox==2 and b.outbox[1].message:sub(1,2)=='R|' and b.outbox[1].message:sub(-1)=='0')
 assert(b.outbox[2].message:sub(1,2)=='T|')
 print('PASS: permanent tag IDs/byte mapping, validation, compact storage, broadcast reordering, authenticated tags, lookup tags and v1 compatibility')
+-- Tag choices are laid out in rows of opposites, most-used pairs first.
+do
+ local groups=a:SortedReviewTagGroups({[34]=5,[3]=2})
+ assert(#groups.positive==15 and #groups.negative==15)
+ assert(groups.positive[1]==12 and groups.negative[1]==34,'most-used pair first')
+ assert(groups.positive[2]==3 and groups.negative[2]==47)
+ for row=1,15 do
+  local p,n=groups.positive[row],groups.negative[row]
+  assert(a:EncodeReviewTags({p,n})==nil,'row '..row..' must hold opposites')
+ end
+ print('PASS: tag choices shown in rows of opposites')
+end

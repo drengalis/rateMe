@@ -15,12 +15,14 @@ local registry = {
     [8]={name="Good Communicator",positive=true},
     [9]={name="Well Prepared",positive=true},
     [10]={name="Knows Mechanics",positive=true},
-    [11]={name="Protects Teammates",positive=true},
+    [11]={name="Uses Crowd Control",positive=true},
     [12]={name="Good Sportsmanship",positive=true},
     [13]={name="Shares Resources",positive=true},
+    [14]={name="Responsive",positive=true},
+    [15]={name="Careful Pulls",positive=true},
     [33]={name="Ninja Looter",positive=false},
     [34]={name="Toxic",positive=false},
-    [35]={name="Griefer",positive=false},
+    [35]={name="Griefer",positive=false,retired=true},
     [36]={name="Frequently AFK",positive=false},
     [37]={name="Abandons Groups",positive=false},
     [38]={name="Uncooperative",positive=false},
@@ -28,12 +30,20 @@ local registry = {
     [40]={name="Reckless Pulls",positive=false},
     [41]={name="Unprepared",positive=false},
     [42]={name="Poor Communication",positive=false},
-    [43]={name="Breaks Crowd Control",positive=false},
-    [44]={name="Disrespects Loot Rules",positive=false},
+    [43]={name="Ignores Crowd Control",positive=false},
+    [44]={name="Disrespects Loot Rules",positive=false,retired=true},
     [45]={name="Resource Hog",positive=false},
+    [46]={name="Poor Leadership",positive=false},
+    [47]={name="Elitist",positive=false},
+    [48]={name="Underperforms",positive=false},
+    [49]={name="Impatient",positive=false},
 }
-local opposite = {[2]={[38]=true},[7]={[33]=true,[44]=true},[8]={[42]=true},
-    [9]={[41]=true},[10]={[39]=true},[12]={[34]=true,[35]=true},[13]={[45]=true}}
+-- Each positive tag and its negative opposite can't be chosen together.
+-- Retired tags keep their old conflicts for reviews that still carry them.
+local opposite = {[1]={[46]=true},[2]={[38]=true},[3]={[47]=true},[4]={[48]=true},
+    [5]={[37]=true},[6]={[49]=true},[7]={[33]=true,[44]=true},[8]={[42]=true},
+    [9]={[41]=true},[10]={[39]=true},[11]={[43]=true},[12]={[34]=true,[35]=true},
+    [13]={[45]=true},[14]={[36]=true},[15]={[40]=true}}
 -- One safe ASCII byte per ID. Preserve this alphabet and ID-to-byte mapping.
 local alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 A.TAG_REGISTRY = registry
@@ -114,21 +124,40 @@ function A:TagUsageCounts()
     return counts
 end
 
+-- Choices are shown in rows of opposites: each positive tag beside its
+-- negative counterpart. Rows are ordered by how often either tag of the pair
+-- is used, then by the positive tag's name. groups.positive[n] and
+-- groups.negative[n] form row n; any tag without an active opposite follows
+-- the pairs in its own column, ordered the same way.
 function A:SortedReviewTagGroups(counts)
     counts=counts or self:TagUsageCounts()
-    local groups={positive={},negative={}}
+    local function used(id) return id and (counts[id] or 0) or 0 end
+    local rows,paired={},{}
     for id,tag in pairs(registry) do
-        if not tag.retired then
-            local group=tag.positive and groups.positive or groups.negative
-            group[#group+1]=id
+        if tag.positive and not tag.retired then
+            local partner
+            for other in pairs(opposite[id] or {}) do
+                if registry[other] and not registry[other].retired and (not partner or other<partner) then partner=other end
+            end
+            rows[#rows+1]={positive=id,negative=partner}
+            if partner then paired[partner]=true end
         end
     end
-    local function commonFirst(a,b)
-        local ca,cb=counts[a] or 0,counts[b] or 0
-        if ca~=cb then return ca>cb end
-        return registry[a].name<registry[b].name
+    for id,tag in pairs(registry) do
+        if not tag.positive and not tag.retired and not paired[id] then rows[#rows+1]={negative=id} end
     end
-    table.sort(groups.positive,commonFirst)
-    table.sort(groups.negative,commonFirst)
+    local function name(row) return registry[row.positive or row.negative].name end
+    table.sort(rows,function(a,b)
+        local ca,cb=used(a.positive)+used(a.negative),used(b.positive)+used(b.negative)
+        local fa,fb=a.positive and a.negative and 0 or 1,b.positive and b.negative and 0 or 1
+        if fa~=fb then return fa<fb end
+        if ca~=cb then return ca>cb end
+        return name(a)<name(b)
+    end)
+    local groups={positive={},negative={}}
+    for _,row in ipairs(rows) do
+        if row.positive then groups.positive[#groups.positive+1]=row.positive end
+        if row.negative then groups.negative[#groups.negative+1]=row.negative end
+    end
     return groups
 end

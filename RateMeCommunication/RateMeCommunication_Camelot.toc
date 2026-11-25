@@ -2,7 +2,7 @@
 ## Title: Rate Me! Communication
 ## Notes: Shares ratings with other Rate Me! users. Required by Rate Me!.
 ## Author: Rate Me! Community
-## Version: 1.0.0
+## Version: 1.1.0
 ## Dependencies: RateMeData
 
 Store.lua

@@ -29,13 +29,14 @@ local function frame(kind,name,parent,template)
  function x:SetBackdrop(b)self.backdrop=b end
  function x:SetBackdropColor(...)self.background={...} end
  function x:SetBackdropBorderColor(...)self.border={...} end
- function x:SetAlpha()end
+ function x:SetAlpha(a)self.alpha=a end
  function x:SetText(t)self.text=t;if self.kind=='EditBox' and self.scripts.OnTextChanged then self.scripts.OnTextChanged(self) end end
  function x:GetText()return self.text end
  function x:SetJustifyH(v)self.justify=v end
  function x:SetFontObject(v)self.font=v end
  function x:SetTextColor(...)self.textcolor={...} end
  function x:SetTexture(t)self.texture=t end
+ function x:SetTexCoord(...)self.texcoord={...} end
  function x:SetMultiLine(v)self.multiline=v end
  function x:SetMaxLetters(v)self.maxLetters=v end
  function x:SetMaxBytes(v)self.maxBytes=v end
@@ -66,11 +67,17 @@ UIParent=frame('Frame','UIParent')
 UISpecialFrames={}
 GameFontHighlight='highlight';ChatFontNormal='chat'
 function A:UTF8SafeCut(t,n)return t:sub(1,n)end
+function A:RatingNumberText(s) return string.format('%.1f',s) end
 local chunk=assert(loadfile('RateMe/UI.lua'));chunk('RateMe',A)
 local store=dofile('tests/load_data_addon.lua')
 store:Bind(A)
 A:CreateEditorWindow()
 local f=A.editor
+-- Class icon and class name sit on their own line under the player's name.
+A:SetClassLabel(f.classText,'HUNTER',28,-82)
+assert(f.classText.text=='Hunter' and f.classText.classIcon.className=='Hunter' and f.classText.classIcon.shown)
+A:SetClassLabel(f.classText,nil,28,-82)
+assert(f.classText.text=='' and not f.classText.classIcon.shown)
 assert(not f.comment and not f.commentBox and not f.bytes)
 A:SetTagSelection(f.tagControl,{1,7})
 assert(f.tagControl.count.text=='2 / 3 tags')
@@ -78,9 +85,12 @@ assert(f.tagControl.count.text=='2 / 3 tags')
 local control=f.tagControl
 local count=0
 for _ in pairs(control.buttons)do count=count+1 end
-assert(count==26,'expected 26 active tag choices, got '..count)
-assert(not control.buttons[33].enabled and not control.buttons[44].enabled) -- fair-looter conflicts
+assert(count==30,'expected 30 active tag choices, got '..count)
+assert(not control.buttons[33].enabled and control.buttons[33].alpha==0.5 and control.buttons[1].alpha==1 and control.buttons[44]==nil) -- fair-looter conflict; retired tag not offered
 assert(control.buttons[1].enabled and control.buttons[7].enabled) -- selected choices stay clickable
+assert(control.buttons[1].isSelected and control.buttons[1].check.shown,
+ 'selected choice is marked')
+assert(not control.buttons[2].isSelected and not control.buttons[2].check.shown)
 A:ToggleSelectionTag(control,4)
 assert(#control.tags==3 and not control.buttons[3].enabled,'unselected choices disable at three tags')
 A:ToggleSelectionTag(control,3)

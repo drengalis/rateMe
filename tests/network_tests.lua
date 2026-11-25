@@ -91,3 +91,36 @@ for _,budget in ipairs({1,20}) do
  assert(A.netStats.querySeeds==budget, 'configured root budget '..budget)
 end
 print('PASS: configurable 1 and 20 root-peer budgets across lookup waves')
+-- Lookups the player starts (rating/reviews windows, Refresh) always run,
+-- even when automatic lookups fill every slot, and their messages are sent
+-- ahead of anything already waiting.
+reset()
+local validate=A.ValidateStoredTarget
+A.ValidateStoredTarget=function(_,x) return type(x)=='table' and type(x.guid)=='string' end
+for i=1,5 do assert(A:Query({guid='Player-BG-'..i,name='Bg'..i..'-Realm',faction='Alliance'}));advance(t+2.1) end
+local started,reason=A:Query({guid='Player-BG-6',name='Bg6-Realm',faction='Alliance'})
+assert(not started and reason=='busy','automatic lookups stay capped')
+local waiting=#A.outbox
+assert(waiting>0)
+assert(A:Query(target,false,true),'window lookup must start past the cap')
+advance(t+0.7)
+assert(#A.outbox>waiting)
+local mine=A.runtime.requests[(function() for id,r in pairs(A.runtime.requests) do if r.guid==target.guid then return id end end end)()]
+assert(mine.interactive)
+for i=1,6 do
+ assert(A.outbox[i].urgent and A.outbox[i].message:find(mine.id,1,true),'window lookup messages go first: '..i)
+end
+A.ValidateStoredTarget=validate
+print('PASS: window lookups bypass the running-lookup cap and send first')
+-- Replies count in the summary as soon as they arrive, while the lookup runs.
+reset();assert(A:Query(target,false,true));advance(1);id=next(A.runtime.requests)
+local live=A:GetSummary(target.guid)
+assert(live and live.checking and live.replies==0 and live.count==0)
+A:HandleRating({'R',id,target.guid,'4','1','100000','0'},'Voter001-Realm')
+A:HandleRating({'R',id,target.guid,'2','1','100000','0'},'Voter002-Realm')
+live=A:GetSummary(target.guid)
+assert(live.checking and live.replies==2 and live.count==2 and live.average==3,'live summary')
+advance(16)
+live=A:GetSummary(target.guid)
+assert(not live.checking and live.count==2 and live.average==3,'finished summary keeps the replies')
+print('PASS: replies show in the summary while the lookup is still running')

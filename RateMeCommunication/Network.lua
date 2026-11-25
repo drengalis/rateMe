@@ -54,7 +54,9 @@ function A:NetworkStatsText()
         s.droppedGlobal or 0, s.droppedPeer or 0, self.outbox and #self.outbox or 0)
 end
 
-function A:QueueSend(message, channel, target, logged)
+-- urgent: messages for a lookup the player started (rating or reviews window,
+-- Refresh) go ahead of everything else waiting, after earlier urgent ones.
+function A:QueueSend(message, channel, target, logged, urgent)
     if type(message) ~= "string" or #message > 255 or #message == 0 then return false end
     if type(channel) ~= "string" then return false end
     if channel == "WHISPER" then
@@ -89,10 +91,15 @@ function A:QueueSend(message, channel, target, logged)
     end
     local job = {
         message = message, channel = channel, target = target, logged = logged,
-        due = self:Now(), retries = 0, bulk = bulk,
+        due = self:Now(), retries = 0, bulk = bulk, urgent = urgent and not bulk or nil,
     }
     local at = #self.outbox + 1
-    if not bulk then
+    if job.urgent then
+        at = #self.outbox + 1
+        for index, queued in ipairs(self.outbox) do
+            if not queued.urgent then at = index; break end
+        end
+    elseif not bulk then
         -- Lookups, replies and discovery go ahead of every waiting announcement.
         for index, queued in ipairs(self.outbox) do
             if queued.bulk then at = index; break end
@@ -273,12 +280,13 @@ function A:SendQueryWave(id, maximum)
     local sent = 0
     for _, peer in ipairs(selected) do
         local packet = self:EncodePacket("Q", {id, request.guid, self.myName, MAX_HOPS}, peer)
-        if self:QueueSend(packet, "WHISPER", peer) then
+        if self:QueueSend(packet, "WHISPER", peer, nil, request.interactive) then
             request.seeded[self:Key(peer)] = true
             request.seedCount = request.seedCount + 1
             sent = sent + 1
             self:BumpNetworkStat("querySeeds")
-            self:QueueSend(self.payload:SharedLookup(id, request.target, MAX_HOPS), "WHISPER", peer)
+            self:QueueSend(self.payload:SharedLookup(id, request.target, MAX_HOPS), "WHISPER", peer, nil,
+                request.interactive)
         end
     end
     return sent
@@ -361,7 +369,9 @@ function A:Query(target, force, interactive)
     if not force and c and c.fetchedAt and t - c.fetchedAt < self.CACHE_SECONDS then return false, "fresh" end
     -- Coalesce lookups of the same player, even when a forced refresh is requested.
     if c and c.queryUntil and t < c.queryUntil then return false, "running" end
-    if self:ActiveQueries() >= self.MAX_PENDING then return false, "busy" end
+    -- Lookups the player starts always run, even past the limit on automatic
+    -- lookups running at once; otherwise the window would wait on nothing.
+    if not interactive and self:ActiveQueries() >= self.MAX_PENDING then return false, "busy" end
     local budget = self.lookupBudget
     if not budget or t - budget.started >= 60 then
         budget = {started = t, count = 0, last = budget and budget.last or -math.huge}
@@ -376,7 +386,7 @@ function A:Query(target, force, interactive)
     local id = self:NewRequestID()
     local pending = {id = id, guid = target.guid, target = target,
         expires = t + self.QUERY_SECONDS, votes = {}, revisions = {},
-        seeded = {}, seedCount = 0, responseCount = 0}
+        seeded = {}, seedCount = 0, responseCount = 0, interactive = interactive and true or nil}
     local own = self:GetOwnRating(target.guid)
     if own and not own.removed and own.faction == self.myFaction and own.score >= 1 and own.score <= 5 then
         pending.votes[self:Key(self.myName)] = {

@@ -283,6 +283,109 @@ end
 -- Stored timestamps are UTC-based Unix epoch seconds. WoW's date() uses
 -- the player's local client timezone unless the format starts with "!".
 -- Keep the conversion at display time, never in SavedVariables or packets.
+-- Round class icons from the default UI (the same art as unit frames), with
+-- built-in coordinates in case the game's CLASS_ICON_TCOORDS table is missing.
+local CLASS_ICON_TEXTURE = "Interface\\TargetingFrame\\UI-Classes-Circles"
+local FALLBACK_CLASS_COORDS = {
+    WARRIOR = {0, 0.25, 0, 0.25}, MAGE = {0.25, 0.49609375, 0, 0.25},
+    ROGUE = {0.49609375, 0.7421875, 0, 0.25}, DRUID = {0.7421875, 0.98828125, 0, 0.25},
+    HUNTER = {0, 0.25, 0.25, 0.5}, SHAMAN = {0.25, 0.49609375, 0.25, 0.5},
+    PRIEST = {0.49609375, 0.7421875, 0.25, 0.5}, WARLOCK = {0.7421875, 0.98828125, 0.25, 0.5},
+    PALADIN = {0, 0.25, 0.5, 0.75},
+}
+
+local function classToken(class)
+    if type(class) ~= "string" or class == "" then return nil end
+    local token = class:upper():gsub("%s", "")
+    if (CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[token]) or FALLBACK_CLASS_COORDS[token] then return token end
+    return nil
+end
+
+-- Give a name label a round class icon that sits just before the name and
+-- shows the class name on mouseover. onClick lets a click on the icon still
+-- act on the row it belongs to.
+function A:AttachClassIcon(fs, parent, onClick)
+    local icon = CreateFrame("Frame", nil, parent)
+    icon:SetSize(16, 16)
+    icon.texture = icon:CreateTexture(nil, "ARTWORK")
+    icon.texture:SetAllPoints(icon)
+    icon.texture:SetTexture(CLASS_ICON_TEXTURE)
+    -- Thin black outline: the same round class art, tinted black and drawn
+    -- 1px larger all round behind the icon.
+    icon.border = icon:CreateTexture(nil, "BACKGROUND")
+    icon.border:SetTexture(CLASS_ICON_TEXTURE)
+    icon.border:SetSize(18, 18)
+    icon.border:SetPoint("CENTER", icon, "CENTER", 0, 0)
+    icon.border:SetVertexColor(0, 0, 0)
+    icon:EnableMouse(true)
+    icon:SetScript("OnEnter", function(self)
+        if not self.className then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        local color = RAID_CLASS_COLORS and RAID_CLASS_COLORS[self.token]
+        if color then GameTooltip:AddLine(self.className, color.r, color.g, color.b)
+        else GameTooltip:AddLine(self.className, 1, 1, 1) end
+        GameTooltip:Show()
+    end)
+    icon:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    if onClick then icon:SetScript("OnMouseUp", function() onClick() end) end
+    icon:Hide()
+    fs.classIcon = icon
+    fs.classIconParent = parent
+    return icon
+end
+
+local function className(token)
+    return (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[token])
+        or (token:sub(1, 1) .. token:sub(2):lower())
+end
+
+-- Put "<class icon> text" on a label made with AttachClassIcon. The icon sits
+-- just before the visible text whatever the label's alignment: left-aligned
+-- labels move right to make room, centred labels move right by half so the
+-- icon and text stay centred together, and right-aligned labels stay put.
+-- x, y are the label's normal TOPLEFT offsets on its parent.
+local ICON_SPACE = 22 -- icon plus gap
+function A:SetIconLabel(fs, text, class, x, y)
+    fs:SetText(text)
+    local icon, token = fs.classIcon, classToken(class)
+    local justify = fs.justify or (fs.GetJustifyH and fs:GetJustifyH()) or "CENTER"
+    local shift = 0
+    if token and justify == "LEFT" then shift = ICON_SPACE
+    elseif token and justify == "CENTER" then shift = ICON_SPACE / 2 end
+    if x and y then
+        fs:ClearAllPoints()
+        fs:SetPoint("TOPLEFT", fs.classIconParent, "TOPLEFT", x + shift, y)
+    end
+    if not icon then return end
+    if not token then icon:Hide(); icon.className = nil; return end
+    local coords = (CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[token]) or FALLBACK_CLASS_COORDS[token]
+    icon.texture:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+    icon.border:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+    icon.token = token
+    icon.className = className(token)
+    icon:ClearAllPoints()
+    local width = fs.GetStringWidth and fs:GetStringWidth() or 0
+    if justify == "LEFT" then
+        icon:SetPoint("RIGHT", fs, "LEFT", -6, 0)
+    elseif justify == "RIGHT" then
+        icon:SetPoint("RIGHT", fs, "RIGHT", -(width + 6), 0)
+    else
+        icon:SetPoint("RIGHT", fs, "CENTER", -(width / 2 + 6), 0)
+    end
+    icon:Show()
+end
+
+-- "<class icon> Name" wherever a player's name and class are shown together.
+function A:SetPlayerLabel(fs, name, class, x, y)
+    self:SetIconLabel(fs, self:DisplayName(name), class, x, y)
+end
+
+-- "<class icon> Class name" on its own line; empty when the class is unknown.
+function A:SetClassLabel(fs, class, x, y)
+    local token = classToken(class)
+    self:SetIconLabel(fs, token and className(token) or "", class, x, y)
+end
+
 function A:DateText(timestamp, includeSeconds)
     if type(timestamp) ~= "number" or timestamp <= 0 then return "Unknown" end
     return date(includeSeconds and "%Y-%m-%d %I:%M:%S %p" or "%Y-%m-%d %I:%M %p", timestamp)
@@ -295,7 +398,7 @@ function A:WindowScoreText(score, size)
     if not value then return "No ratings" end
     value = math.max(0, math.min(5, value))
     local roundedTenth = math.floor(value * 10 + 0.5) / 10
-    return self:StarMarkup(value, size) .. " " .. string.format("%.1f", roundedTenth)
+    return self:StarMarkup(value, size) .. " " .. self:RatingNumberText(roundedTenth)
 end
 
 -- "N unverified, not counted" for reviews left out of the average.
@@ -883,6 +986,7 @@ function A:CreateMainRow(index)
     tex:SetColorTexture(0, 0, 0, index % 2 == 0 and 0.45 or 0.2)
     b.nameText = label(b, "GameFontHighlight", "",
         LIST_COLUMNS.player.x, -7, LIST_COLUMNS.player.width, "RIGHT")
+    A:AttachClassIcon(b.nameText, b, function() if b:GetScript("OnClick") then b:GetScript("OnClick")(b) end end)
     b.subText = label(b, "GameFontDisableSmall", "",
         LIST_COLUMNS.player.x, -23, LIST_COLUMNS.player.width, "RIGHT")
     b.scoreText = label(b, "GameFontNormal", "",
@@ -1006,8 +1110,10 @@ function A:DrawMain()
         index = index + 1
         local row = f.rows[index] or self:CreateMainRow(index)
         row.record = item
-        row.nameText:SetText(self:DisplayName(item.name))
-        row.subText:SetText(item.class or (f.tab == "mine" and "Your review" or "Community lookup"))
+        local hasIcon = classToken(item.class) ~= nil
+        -- With a class icon the name is centred alone; otherwise say what the row is.
+        self:SetPlayerLabel(row.nameText, item.name, item.class, LIST_COLUMNS.player.x, hasIcon and -12 or -7)
+        row.subText:SetText(hasIcon and "" or (f.tab == "mine" and "Your review" or "Community lookup"))
         if f.tab == "grouped" then
             row.scoreText:SetText(item.score and self:WindowScoreText(item.score, 14) or "Not rated")
             row.dateText:SetText(item.inGroup and "In your group" or self:DateText(item.lastGrouped))
@@ -1102,7 +1208,7 @@ function A:CreateTagSelection(parent, window, x, y, width, changed, sidebar)
     c.buttons={}
     local host=sidebar and (sidebar.parent or parent) or c
     c.choices=CreateFrame("Frame",nil,host)
-    c.choices:SetSize(sidebar and sidebar.width or width,344)
+    c.choices:SetSize(sidebar and sidebar.width or width,384)
     c.choices:SetPoint("TOPLEFT",host,"TOPLEFT",sidebar and sidebar.x or 0,sidebar and sidebar.y or -66)
     local columnWidth=math.min(230,((sidebar and sidebar.width or width)-12)/2)
     c.columnWidth=columnWidth
@@ -1115,7 +1221,17 @@ function A:CreateTagSelection(parent, window, x, y, width, changed, sidebar)
             local b=button(c.choices,"",columnWidth,23,0,0,function() A:ToggleSelectionTag(c,tagId) end)
             b.caption=label(b,"GameFontHighlightSmall","",8,-5,columnWidth-28)
             if b.caption.SetWordWrap then b.caption:SetWordWrap(false) end
-            b.selected=label(b,"GameFontHighlightSmall","",columnWidth-18,-5,12)
+            -- Centre the text vertically on the button (the art's lower rim
+            -- is a little deeper, so sit 1px below the true middle).
+            b.caption:ClearAllPoints()
+            b.caption:SetPoint("CENTER",b,"CENTER",-6,-1)
+            if b.caption.SetJustifyV then b.caption:SetJustifyV("MIDDLE") end
+            -- Selected tags: a check mark and a dull yellow button background.
+            b.check=b:CreateTexture(nil,"OVERLAY")
+            b.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+            b.check:SetSize(20,20)
+            b.check:SetPoint("LEFT",b,"LEFT",4,0)
+            b.check:Hide()
             c.buttons[id]=b
         end
     end
@@ -1178,6 +1294,29 @@ function A:SortTagSelection(control, counts)
     end
 end
 
+-- Selected tag buttons get a dull yellow background: the button's art is
+-- greyed and tinted. nil restores the normal look.
+local SELECTED_BACKGROUND = {0.80, 0.68, 0.30}
+-- Unselected tag buttons drop the red: the same art greyed, untinted, which
+-- matches the grey of the game's disabled buttons.
+local UNSELECTED_BACKGROUND = {1, 1, 1}
+local function tintButton(b, color)
+    local seen = {}
+    local regions = {b.Left, b.Middle, b.Right,
+        b.GetNormalTexture and b:GetNormalTexture(), b.GetPushedTexture and b:GetPushedTexture()}
+    for i = 1, 5 do
+        local texture = regions[i]
+        if texture and not seen[texture] then
+            seen[texture] = true
+            if texture.SetDesaturated then texture:SetDesaturated(color and true or false) end
+            if texture.SetVertexColor then
+                if color then texture:SetVertexColor(color[1], color[2], color[3])
+                else texture:SetVertexColor(1, 1, 1) end
+            end
+        end
+    end
+end
+
 function A:DrawTagSelection(control)
     local tags=control.tags
     for id,b in pairs(control.buttons) do
@@ -1188,9 +1327,15 @@ function A:DrawTagSelection(control)
             candidate[#candidate+1]=chosen
         end
         candidate[#candidate+1]=id
-        b:SetEnabled(selected or self:EncodeReviewTags(candidate)~=nil)
+        local available=selected or self:EncodeReviewTags(candidate)~=nil
+        b:SetEnabled(available)
+        -- Choices that can't be picked right now (opposite chosen, or three
+        -- tags already) are shown at half opacity.
+        b:SetAlpha(available and 1 or 0.5)
         b.caption:SetText(self:ReviewTagText(id))
-        b.selected:SetText(selected and "*" or "")
+        b.isSelected=selected
+        if selected then b.check:Show() else b.check:Hide() end
+        tintButton(b,selected and SELECTED_BACKGROUND or UNSELECTED_BACKGROUND)
     end
 end
 
@@ -1211,16 +1356,26 @@ end
 function A:CreateEditorWindow()
     -- Left column: player, community rating, your stars, then your chosen tags
     -- stacked below them. Right column: the tag choices. Buttons underneath.
-    local f = makeFrame("RateMeEditorWindow", 960, 480, "Rate Me!")
-    f.targetText = label(f, "GameFontHighlight", "", 28, -58, 450)
-    label(f, "GameFontNormal", "Community rating", 28, -89)
-    f.community = label(f, "GameFontHighlight", "", 28, -111, 452)
-    f.freshness = label(f, "GameFontDisableSmall", "", 28, -132, 452)
-    label(f, "GameFontNormal", "Your rating", 28, -161)
+    local f = makeFrame("RateMeEditorWindow", 960, 510, "Rate Me!")
+    -- Player name as the window's heading, with the class icon and class name
+    -- as a subheading underneath.
+    f.targetText = label(f, "GameFontHighlightLarge", "", 28, -54, 450)
+    f.classText = label(f, "GameFontHighlight", "", 28, -85, 450)
+    local function resize(fs, size)
+        local font, _, flags = fs.GetFont and fs:GetFont()
+        if font then fs:SetFont(font, size, flags) end
+    end
+    resize(f.targetText, 20)
+    resize(f.classText, 14)
+    self:AttachClassIcon(f.classText, f)
+    label(f, "GameFontNormal", "Community rating", 28, -111)
+    f.community = label(f, "GameFontHighlight", "", 28, -133, 452)
+    f.freshness = label(f, "GameFontDisableSmall", "", 28, -154, 452)
+    label(f, "GameFontNormal", "Your rating", 28, -183)
     f.stars = {}
     f.score = 0
     for n = 1, 5 do
-        local b = button(f, "", 65, 43, 28 + (n - 1) * 75, -183, function()
+        local b = button(f, "", 65, 43, 28 + (n - 1) * 75, -205, function()
             f.score = n
             A:UpdateEditorStars()
         end)
@@ -1232,12 +1387,16 @@ function A:CreateEditorWindow()
         f.stars[n] = b
     end
     -- Personal rating uses interactive star textures, plus a numeric score beside them.
-    f.selectedNumeric = label(f, "GameFontHighlight", "", 405, -194, 74)
-    f.scoreText = label(f, "GameFontHighlightSmall", "", 28, -232, 430)
-    label(f, "GameFontNormal", "Your tags (optional)", 28, -262)
-    f.tagControl = self:CreateTagSelection(f, f, 28, -284, 452, nil,
+    -- Larger number, centred vertically on the star buttons, just after them.
+    f.selectedNumeric = label(f, "GameFontHighlightLarge", "", 0, 0, 120, "LEFT")
+    f.selectedNumeric:ClearAllPoints()
+    f.selectedNumeric:SetPoint("LEFT", f.stars[5], "RIGHT", 14, 0)
+    resize(f.selectedNumeric, 24)
+    f.scoreText = label(f, "GameFontHighlightSmall", "", 28, -254, 430)
+    label(f, "GameFontNormal", "Your tags (optional)", 28, -284)
+    f.tagControl = self:CreateTagSelection(f, f, 28, -306, 452, nil,
         {x=496, y=-70, width=432, vertical=true})
-    f.save = button(f, "Save Rating", 125, 26, 28, -431, function()
+    f.save = button(f, "Save Rating", 125, 26, 28, -453, function()
         local ok, err = A:SaveOwnRating(f.target, f.score, f.tagControl.tags)
         if ok then
             f:Hide()
@@ -1253,7 +1412,7 @@ function A:CreateEditorWindow()
             if f.target == target then f:Hide() end
         end
     end
-    f.remove = button(f, "Remove", 86, 26, 158, -431, function()
+    f.remove = button(f, "Remove", 86, 26, 158, -453, function()
         local target = f.target
         if not target then return end
         if not A.db.settings.confirmRemoveRating then
@@ -1262,7 +1421,7 @@ function A:CreateEditorWindow()
         end
         A:ShowRemoveRatingConfirm(target, removeRating)
     end)
-    button(f, "Cancel", 112, 26, 250, -431, function() f:Hide() end)
+    button(f, "Cancel", 112, 26, 250, -453, function() f:Hide() end)
     self.editor = f
 end
 
@@ -1336,7 +1495,7 @@ function A:UpdateEditorStars()
     for n, b in ipairs(f.stars) do
         b.starTexture:SetTexture(n <= f.score and self.STAR_FULL_TEXTURE or self.STAR_EMPTY_TEXTURE)
     end
-    f.selectedNumeric:SetText(f.score > 0 and string.format("%.1f", f.score) or "Not rated")
+    f.selectedNumeric:SetText(f.score > 0 and self:RatingNumberText(f.score) or "Not rated")
     f.scoreText:SetText(f.score > 0 and "Click another star to change your rating" or "Select a star to rate this player")
     f.save:SetEnabled(f.score > 0)
 end
@@ -1345,7 +1504,12 @@ function A:UpdateEditorSummary()
     if not f or not f.target then return end
     local summary = self:GetSummary(f.target.guid)
     f.community:SetText(self:ScoreText(summary))
-    if summary and summary.at and summary.at > 0 then
+    if summary and summary.checking then
+        local replies = summary.replies or 0
+        f.freshness:SetText(replies == 0 and "Checking reachable online reviewers..."
+            or string.format("Checking reachable online reviewers... %d repl%s so far",
+                replies, replies == 1 and "y" or "ies"))
+    elseif summary and summary.at and summary.at > 0 then
         f.freshness:SetText("Checked: " .. self:DateText(summary.at)
             .. (summary.fresh and " (recent online sample)" or " (stale snapshot)"))
     else
@@ -1363,7 +1527,8 @@ function A:OpenEditor(target)
     local prior = self:GetOwnRating(f.target.guid)
     f.score = (prior and not prior.removed and prior.score) or 0
     self:SetTagSelection(f.tagControl, (prior and not prior.removed and prior.tags) or "")
-    f.targetText:SetText(self:DisplayName(f.target.name) .. (f.target.class and ("  •  " .. f.target.class) or ""))
+    f.targetText:SetText(self:DisplayName(f.target.name))
+    self:SetClassLabel(f.classText, f.target.class, 28, -85)
     f.remove:SetEnabled(prior ~= nil and not prior.removed)
     f.save:SetText(prior and not prior.removed and "Update Rating" or "Save Rating")
     self:UpdateEditorStars()
@@ -1627,17 +1792,19 @@ local PARTY_VISIBLE_ROWS = 4
 local PARTY_ROWS_WIDTH = 662
 local PARTY_TAG_PANEL_X = 732
 local PARTY_TAG_PANEL_WIDTH = 432
+-- Tall enough for the heading plus 15 tags per column.
+local PARTY_TAG_PANEL_HEIGHT = 440
 local PARTY_ROWS_TOP = -110
 -- The tag panel's outer box (panel frame plus its 8px padding), in window coordinates.
 local PARTY_PANEL_BOX_LEFT = 732 - 8
 local PARTY_PANEL_BOX_TOP = -104 + 8
-local PARTY_PANEL_BOX_BOTTOM = -104 - 392 - 8
+local PARTY_PANEL_BOX_BOTTOM = -104 - PARTY_TAG_PANEL_HEIGHT - 8
 local PARTY_ROW_COLOR = {0.10, 0.09, 0.08}
 local PARTY_ACTIVE_ROW_COLOR = {0.32, 0.27, 0.12}
 local PARTY_HOVER_ROW_COLOR = {0.20, 0.18, 0.14}
 
 function A:CreatePartyReviewWindow()
-    local f = makeFrame("RateMePartyReviewWindow", 1190, 560, "Rate Me! - Rate Your Party")
+    local f = makeFrame("RateMePartyReviewWindow", 1190, 608, "Rate Me! - Rate Your Party")
     label(f, "GameFontHighlightSmall",
         "Choose stars for each player. Click a player to show their tags in the panel on the right (up to three). Leave a player unrated to skip them.",
         66, -40, 1090)
@@ -1655,7 +1822,7 @@ function A:CreatePartyReviewWindow()
     f.rows = {}
 
     local panel = CreateFrame("Frame", nil, f)
-    panel:SetSize(PARTY_TAG_PANEL_WIDTH, 392)
+    panel:SetSize(PARTY_TAG_PANEL_WIDTH, PARTY_TAG_PANEL_HEIGHT)
     panel:SetPoint("TOPLEFT", f, "TOPLEFT", PARTY_TAG_PANEL_X, -104)
     -- Same fill and gold outline as the selected row; a bridge (below) joins
     -- the two into one shape, so the panel reads as "that player's tags".
@@ -1711,7 +1878,7 @@ function A:CreatePartyReviewWindow()
         f.scroll:HookScript("OnVerticalScroll", function() A:PositionPartyTagBridge() end)
     end
 
-    f.save = button(f, "Save Ratings", 155, 27, 860, -514, function()
+    f.save = button(f, "Save Ratings", 155, 27, 860, -562, function()
         if f.testMode then
             f.status:SetText("|cffffd100TEST WINDOW|r - nothing is saved or shared.")
             return
@@ -1744,7 +1911,7 @@ function A:CreatePartyReviewWindow()
             A:Log(string.format("Saved %d party rating%s.", saved, saved == 1 and "" or "s"))
         end
     end)
-    button(f, "Not Now", 135, 27, 1029, -514, function() f:Hide() end)
+    button(f, "Not Now", 135, 27, 1029, -562, function() f:Hide() end)
     -- Loading screens close every Escape-closable window; the time lets the
     -- party popup tell that apart from the player closing it.
     f:HookScript("OnHide", function(self) self.hiddenAt = GetTime and GetTime() end)
@@ -1785,6 +1952,7 @@ function A:CreatePartyReviewRow(index)
     row:SetScript("OnEnter", function() A:SetPartyRowHover(row, true) end)
     row:SetScript("OnLeave", function() A:SetPartyRowHover(row, false) end)
     row.nameText = label(row, "GameFontHighlight", "", 12, -8, 235)
+    self:AttachClassIcon(row.nameText, row, function() A:SelectPartyTagRow(row) end)
     row.communityText = label(row, "GameFontDisableSmall", "", 12, -29, 245)
     row.stars = {}
     row.score = 0
@@ -1911,7 +2079,7 @@ function A:UpdatePartyReviewRow(row)
     for n, star in ipairs(row.stars) do
         star.icon:SetTexture(n <= row.score and self.STAR_FULL_TEXTURE or self.STAR_EMPTY_TEXTURE)
     end
-    row.numeric:SetText(row.score > 0 and string.format("%.1f", row.score) or "Not rated")
+    row.numeric:SetText(row.score > 0 and self:RatingNumberText(row.score) or "Not rated")
     row.dirty = row.score ~= row.initialScore or self:EncodeReviewTags(row.tagControl.tags) ~= row.initialTags
 end
 
@@ -1935,9 +2103,8 @@ function A:OpenPartyReview(members, testMode)
             row.loading = true
             self:SetTagSelection(row.tagControl, row.initialTags, tagCounts)
             row.loading = false
-            -- Same "Name  •  CLASS" format as the rating window.
-            row.nameText:SetText(self:DisplayName(target.name)
-                .. (target.class and target.class ~= "" and ("  •  " .. target.class) or ""))
+            -- Same "<class icon> Name" format as the rating window.
+            self:SetPlayerLabel(row.nameText, target.name, target.class, 12, -8)
             local community = self:GetSummary(target.guid)
             if community and community.count and community.count > 0 then
                 row.communityText:SetText("Community: " .. self:WindowScoreText(community.average, 11)

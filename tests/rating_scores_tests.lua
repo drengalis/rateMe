@@ -223,6 +223,7 @@ CreateFrame=function() return stub() end
 UIParent=stub()
 assert(loadfile('RateMe/UI.lua'))('RateMe',a)
 function a:StarMarkup() return '*' end
+function a:RatingNumberText(s) return string.format('%.1f',s) end
 local text=a:ScoreText(summary)
 assert(text:find('(3 verified ratings)',1,true) and text:find('3 unverified, not counted',1,true),text)
 assert(a:ScoreText(only)=='No verified ratings  \194\183  1 unverified, not counted',a:ScoreText(only))
