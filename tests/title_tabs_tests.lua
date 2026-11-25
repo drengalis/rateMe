@@ -59,17 +59,18 @@ assert(f.footerBackground and f.footerBackground.points[1][3]=='BOTTOMLEFT' and 
     f.footerBackground.points[2][1]=='BOTTOMRIGHT' and f.footerBackground.points[2][5]==12,
     'Footer background should sit below the list and inside the frame border')
 -- Tabs are right-aligned below the titlebar and chained right to left.
-local tabs={f.tabMine,f.tabRecent,f.tabSettings}
-assert(tabs[1].text=='My Ratings' and tabs[2].text=='Recent Lookups' and tabs[3].text=='Settings')
-assert(tabs[3].point[1]=='TOPRIGHT' and tabs[3].point[2]==f and tabs[3].point[4]==-29 and tabs[3].point[5]==-38,
+local tabs={f.tabMine,f.tabRecent,f.tabGrouped,f.tabSettings}
+assert(tabs[1].text=='My Ratings' and tabs[2].text=='Recent Lookups' and tabs[3].text=='Recent Players'
+    and tabs[4].text=='Settings')
+assert(tabs[4].point[1]=='TOPRIGHT' and tabs[4].point[2]==f and tabs[4].point[4]==-29 and tabs[4].point[5]==-38,
     'Settings tab must align with the right-hand dividers, below the titlebar')
-for i=1,2 do
+for i=1,3 do
     assert(tabs[i].point[1]=='TOPRIGHT' and tabs[i].point[2]==tabs[i+1] and tabs[i].point[3]=='TOPLEFT'
         and tabs[i].point[4]<=-4 and tabs[i].point[5]==0, 'Tabs must chain without overlapping')
 end
-local settingsLeft=f.width-29-tabs[3].width
-local recentLeft=settingsLeft+tabs[2].point[4]-tabs[2].width
-local mineLeft=recentLeft+tabs[1].point[4]-tabs[1].width
+local left=f.width-29-tabs[4].width
+for i=3,1,-1 do left=left+tabs[i].point[4]-tabs[i].width end
+local mineLeft=left
 assert(f.tagline.point[4]+f.tagline.width < mineLeft, 'Tagline and navigation overlap')
 f.settingsPanel=mock('Frame','settings')
 A.DrawSettings=function() end

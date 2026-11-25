@@ -52,7 +52,7 @@ function Store:Open(protocol, now, recentLimit)
         error("RateMeData: unsupported settings schema; refusing to modify RateMeDB")
     end
     db.schema, db.settingsSchema = self.SCHEMA_VERSION, 1
-    for _, key in ipairs({"authored", "settings", "ignored", "recent", "peers", "community", "windows"}) do
+    for _, key in ipairs({"authored", "settings", "ignored", "recent", "grouped", "peers", "community", "windows"}) do
         if type(db[key]) ~= "table" then db[key] = {} end
     end
     if db.peerProtocol ~= protocol then
@@ -60,6 +60,12 @@ function Store:Open(protocol, now, recentLimit)
         db.peerProtocol = protocol
     end
     pruneOldest(db.recent, recentLimit or 150, dateOf)
+    -- Recent Players: same limit as Recent Lookups. Nobody is "in your group"
+    -- until the group is seen again after login or /reload.
+    for guid, item in pairs(db.grouped) do
+        if type(item) ~= "table" then db.grouped[guid] = nil else item.inGroup = false end
+    end
+    pruneOldest(db.grouped, recentLimit or 150, function(item) return tonumber(item.lastGrouped) or 0 end)
     -- Reviews nobody has confirmed (passed along by someone other than the
     -- author) are deleted 90 days after this client received them; a player left with no reviews is
     -- removed. Verified reviews, including removals, are kept.

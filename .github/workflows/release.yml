@@ -1,0 +1,86 @@
+# Publishes a GitHub release whenever the version in RateMe/RateMe.toc changes on main.
+#
+# To release: bump "## Version:" in all six .toc files (RateMe, RateMeData and
+# RateMeCommunication, each with its _Camelot copy), optionally add
+# release-notes/vX.md, and push to main. The workflow creates tag vX, builds
+# RateMe-vX.zip (containing the RateMe, RateMeData and RateMeCommunication
+# folders ready for Interface\AddOns) and publishes the release.
+# If the tag already exists, nothing happens. It can also be run by hand from the
+# Actions tab.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - RateMe/RateMe.toc
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from .toc files
+        id: version
+        run: |
+          read_version() {
+            sed -n 's/^## Version:[[:space:]]*\([^[:space:]]*\).*/\1/p' "$1" | tr -d '\r'
+          }
+          version=$(read_version RateMe/RateMe.toc)
+          if [ -z "$version" ]; then
+            echo "No '## Version:' line found in RateMe/RateMe.toc" >&2
+            exit 1
+          fi
+          # All three addons ship together, so every .toc must carry the same version.
+          for toc in RateMe/*.toc RateMeData/*.toc RateMeCommunication/*.toc; do
+            other=$(read_version "$toc")
+            if [ "$other" != "$version" ]; then
+              echo "$toc has version '$other' but RateMe/RateMe.toc has '$version'" >&2
+              exit 1
+            fi
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this version is already released
+        id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Release ${{ steps.version.outputs.tag }} already exists; skipping."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build zip
+        if: steps.exists.outputs.exists == 'false'
+        run: |
+          mkdir -p dist
+          cp -r RateMe RateMeData RateMeCommunication dist/
+          cd dist
+          zip -r "RateMe-${{ steps.version.outputs.tag }}.zip" RateMe RateMeData RateMeCommunication
+
+      - name: Publish release
+        if: steps.exists.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          notes="release-notes/$tag.md"
+          if [ -f "$notes" ]; then
+            notes_args=(--notes-file "$notes")
+          else
+            notes_args=(--generate-notes)
+          fi
+          gh release create "$tag" "dist/RateMe-$tag.zip" \
+            --target "$GITHUB_SHA" \
+            --title "Rate Me! $tag" \
+            "${notes_args[@]}"

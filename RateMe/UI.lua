@@ -352,14 +352,17 @@ function A:CreateMainWindow()
     -- row holds the tagline (left) and the navigation tabs (right-aligned, so
     -- they stay at the right edge when the window is resized).
     -- x = 66 keeps the tagline clear of the round portrait in the top-left corner.
-    f.tagline = label(f, "GameFontDisableSmall", "Reputation earned. Reputation shared.", 66, -48, 300, "LEFT")
+    f.tagline = label(f, "GameFontDisableSmall", "Reputation earned. Reputation shared.", 66, -48, 195, "LEFT")
     f.tab = "mine"
-    f.pages = {mine = 1, recent = 1}
+    f.pages = {mine = 1, recent = 1, grouped = 1}
     f.tabMine = button(f, "My Ratings", 107, 27, 370, -38, function()
         f.tab = "mine"; f.selected = nil; A:DrawMain()
     end)
     f.tabRecent = button(f, "Recent Lookups", 132, 27, 482, -38, function()
         f.tab = "recent"; f.selected = nil; A:DrawMain()
+    end)
+    f.tabGrouped = button(f, "Recent Players", 122, 27, 0, -38, function()
+        f.tab = "grouped"; f.selected = nil; A:DrawMain()
     end)
     f.tabSettings = button(f, "Settings", 98, 27, 619, -38, function()
         f.tab = "settings"; f.selected = nil; A:DrawMain()
@@ -367,8 +370,10 @@ function A:CreateMainWindow()
     f.tabSettings:ClearAllPoints()
     -- The X now sits in the titlebar, so the tabs line up with the dividers.
     f.tabSettings:SetPoint("TOPRIGHT", f, "TOPRIGHT", -29, -38)
+    f.tabGrouped:ClearAllPoints()
+    f.tabGrouped:SetPoint("TOPRIGHT", f.tabSettings, "TOPLEFT", -5, 0)
     f.tabRecent:ClearAllPoints()
-    f.tabRecent:SetPoint("TOPRIGHT", f.tabSettings, "TOPLEFT", -5, 0)
+    f.tabRecent:SetPoint("TOPRIGHT", f.tabGrouped, "TOPLEFT", -5, 0)
     f.tabMine:ClearAllPoints()
     f.tabMine:SetPoint("TOPRIGHT", f.tabRecent, "TOPLEFT", -5, 0)
     -- Keep the title/navigation, list, and pagination/search visually distinct
@@ -467,8 +472,13 @@ function A:CreateMainWindow()
         end
     end)
     f.rows = {}
+    -- Shown in the list area when a tab has no players, or the search has no matches.
+    f.emptyText = label(f, "GameFontDisable", "", 0, 0, 500, "CENTER")
+    f.emptyText:ClearAllPoints()
+    f.emptyText:SetPoint("TOP", f.scroller, "TOP", 0, -40)
+    f.emptyText:Hide()
     f.previousPage = button(f, "Previous", 95, 24, 244, -471, function()
-        if f.tab ~= "mine" and f.tab ~= "recent" then return end
+        if not f.pages[f.tab] then return end
         local page = f.pages[f.tab] or 1
         if page <= 1 then return end
         f.pages[f.tab] = page - 1
@@ -482,7 +492,7 @@ function A:CreateMainWindow()
     f.previousPage:ClearAllPoints()
     f.previousPage:SetPoint("TOPRIGHT", f.pageIndicator, "TOPLEFT", -10, 6)
     f.nextPage = button(f, "Next", 95, 24, 484, -471, function()
-        if f.tab ~= "mine" and f.tab ~= "recent" then return end
+        if not f.pages[f.tab] then return end
         local page = f.pages[f.tab] or 1
         if page >= (f.pageCounts and f.pageCounts[f.tab] or 1) then return end
         f.pages[f.tab] = page + 1
@@ -844,6 +854,24 @@ function A:DrawSettings()
         personalEnabled and 0.91 or 0.56, personalEnabled and 0.86 or 0.60)
 end
 
+-- Recent Players: players you have grouped with, with your own rating if any.
+-- Players still in your group sort first, then the most recently grouped.
+function A:ListRecentPlayers()
+    local items = {}
+    for _, entry in pairs(self.db and self.db.grouped or {}) do
+        if entry.faction == self.myFaction and entry.guid ~= self.myGuid then
+            local own = self:GetOwnRating(entry.guid)
+            items[#items + 1] = {
+                guid = entry.guid, name = entry.name, class = entry.class, faction = entry.faction,
+                fromGame = entry.fromGame, inGroup = entry.inGroup, lastGrouped = entry.lastGrouped,
+                score = own and not own.removed and own.score or nil,
+                date = entry.inGroup and math.huge or entry.lastGrouped,
+            }
+        end
+    end
+    return items
+end
+
 function A:CreateMainRow(index)
     local f = self.main
     local b = CreateFrame("Button", nil, f.content)
@@ -865,7 +893,9 @@ function A:CreateMainRow(index)
         local item = self.record
         if not item then return end
         f.selected = item.guid
-        if f.tab == "mine" then
+        if f.tab == "grouped" then
+            A:OpenEditor(item)
+        elseif f.tab == "mine" then
             if item.owner == A:Key(A.myName) then
                 A:OpenEditor(item)
             else
@@ -885,6 +915,7 @@ function A:DrawMain()
     if not f then return end
     f.tabMine:SetEnabled(f.tab ~= "mine")
     f.tabRecent:SetEnabled(f.tab ~= "recent")
+    f.tabGrouped:SetEnabled(f.tab ~= "grouped")
     f.tabSettings:SetEnabled(f.tab ~= "settings")
     local isSettings = f.tab == "settings"
     f.settingsPanel:SetShown(isSettings)
@@ -904,7 +935,10 @@ function A:DrawMain()
     f.previousPage:SetShown(not isSettings)
     f.pageIndicator:SetShown(not isSettings)
     f.nextPage:SetShown(not isSettings)
-    f.dateHeading:SetText(f.tab == "recent" and "Last checked" or "Date rated")
+    if isSettings then f.emptyText:Hide() end
+    f.dateHeading:SetText(f.tab == "recent" and "Last checked" or f.tab == "grouped" and "Last grouped"
+        or "Date rated")
+    f.ratingHeading:SetText(f.tab == "grouped" and "Your rating" or "Rating")
     f.clearSearch:SetEnabled((f.search:GetText() or "") ~= "")
     if isSettings then self:DrawSettings(); return end
 
@@ -914,7 +948,10 @@ function A:DrawMain()
             f.content:SetWidth(math.max(675, width - 4))
         end
     end
-    local records = f.tab == "mine" and self:ListOwn() or self:ListRecent()
+    local records
+    if f.tab == "mine" then records = self:ListOwn()
+    elseif f.tab == "grouped" then records = self:ListRecentPlayers()
+    else records = self:ListRecent() end
     local filter = f.search:GetText():lower()
     local items = {}
     for _, record in ipairs(records) do
@@ -936,6 +973,22 @@ function A:DrawMain()
     f.status:SetText(total == 0 and "0 players" or
         string.format("%d-%d of %d players", first, last, total))
     f.pageIndicator:SetText(string.format("Page %d of %d", page, pageCount))
+    if total == 0 then
+        local message
+        if filter ~= "" then
+            message = "No players match your search."
+        elseif f.tab == "mine" then
+            message = "You haven't rated anyone yet.\nRight-click a friendly player to rate them."
+        elseif f.tab == "grouped" then
+            message = "No players yet.\nPlayers you group with will appear here."
+        else
+            message = "No recent lookups yet.\nPlayers you look up will appear here."
+        end
+        f.emptyText:SetText(message)
+        f.emptyText:Show()
+    else
+        f.emptyText:Hide()
+    end
     f.previousPage:SetEnabled(page > 1)
     f.nextPage:SetEnabled(page < pageCount)
     -- Clear list selection if filtering/paging has moved it out of view.
@@ -955,7 +1008,10 @@ function A:DrawMain()
         row.record = item
         row.nameText:SetText(self:DisplayName(item.name))
         row.subText:SetText(item.class or (f.tab == "mine" and "Your review" or "Community lookup"))
-        if f.tab == "mine" then
+        if f.tab == "grouped" then
+            row.scoreText:SetText(item.score and self:WindowScoreText(item.score, 14) or "Not rated")
+            row.dateText:SetText(item.inGroup and "In your group" or self:DateText(item.lastGrouped))
+        elseif f.tab == "mine" then
             row.scoreText:SetText(self:WindowScoreText(item.score, 14))
             row.dateText:SetText(self:DateText(item.date))
         else
