@@ -6,8 +6,6 @@ Give friendly, same-faction players 1–5 stars and up to three tags such as **+
 
 *Reputation earned. Reputation shared.*
 
-> Rate Me! is in beta. Things may change between versions.
-
 ## Installing
 
 1. Download the latest version.
