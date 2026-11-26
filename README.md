@@ -47,6 +47,7 @@ To change a rating, open the window again. **Remove** deletes your rating. By de
 | +Shares Resources | -Resource Hog |
 | +Responsive | -Frequently AFK |
 | +Careful Pulls | -Reckless Pulls |
+| +Friendly | -Unfriendly |
 
 Reviews written with older versions may still show **-Griefer** or **-Disrespects Loot Rules**. These tags can no longer be chosen.
 

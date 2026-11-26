@@ -85,7 +85,7 @@ assert(f.tagControl.count.text=='2 / 3 tags')
 local control=f.tagControl
 local count=0
 for _ in pairs(control.buttons)do count=count+1 end
-assert(count==30,'expected 30 active tag choices, got '..count)
+assert(count==32,'expected 32 active tag choices, got '..count)
 assert(not control.buttons[33].enabled and control.buttons[33].alpha==0.5 and control.buttons[1].alpha==1 and control.buttons[44]==nil) -- fair-looter conflict; retired tag not offered
 assert(control.buttons[1].enabled and control.buttons[7].enabled) -- selected choices stay clickable
 assert(control.buttons[1].isSelected and control.buttons[1].check.shown,

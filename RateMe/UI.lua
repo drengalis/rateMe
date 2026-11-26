@@ -1208,7 +1208,7 @@ function A:CreateTagSelection(parent, window, x, y, width, changed, sidebar)
     c.buttons={}
     local host=sidebar and (sidebar.parent or parent) or c
     c.choices=CreateFrame("Frame",nil,host)
-    c.choices:SetSize(sidebar and sidebar.width or width,384)
+    c.choices:SetSize(sidebar and sidebar.width or width,408)
     c.choices:SetPoint("TOPLEFT",host,"TOPLEFT",sidebar and sidebar.x or 0,sidebar and sidebar.y or -66)
     local columnWidth=math.min(230,((sidebar and sidebar.width or width)-12)/2)
     c.columnWidth=columnWidth
@@ -1356,7 +1356,7 @@ end
 function A:CreateEditorWindow()
     -- Left column: player, community rating, your stars, then your chosen tags
     -- stacked below them. Right column: the tag choices. Buttons underneath.
-    local f = makeFrame("RateMeEditorWindow", 960, 510, "Rate Me!")
+    local f = makeFrame("RateMeEditorWindow", 960, 534, "Rate Me!")
     -- Player name as the window's heading, with the class icon and class name
     -- as a subheading underneath.
     f.targetText = label(f, "GameFontHighlightLarge", "", 28, -54, 450)
@@ -1792,8 +1792,8 @@ local PARTY_VISIBLE_ROWS = 4
 local PARTY_ROWS_WIDTH = 662
 local PARTY_TAG_PANEL_X = 732
 local PARTY_TAG_PANEL_WIDTH = 432
--- Tall enough for the heading plus 15 tags per column.
-local PARTY_TAG_PANEL_HEIGHT = 440
+-- Tall enough for the heading plus 16 tags per column.
+local PARTY_TAG_PANEL_HEIGHT = 464
 local PARTY_ROWS_TOP = -110
 -- The tag panel's outer box (panel frame plus its 8px padding), in window coordinates.
 local PARTY_PANEL_BOX_LEFT = 732 - 8
@@ -1804,7 +1804,7 @@ local PARTY_ACTIVE_ROW_COLOR = {0.32, 0.27, 0.12}
 local PARTY_HOVER_ROW_COLOR = {0.20, 0.18, 0.14}
 
 function A:CreatePartyReviewWindow()
-    local f = makeFrame("RateMePartyReviewWindow", 1190, 608, "Rate Me! - Rate Your Party")
+    local f = makeFrame("RateMePartyReviewWindow", 1190, 632, "Rate Me! - Rate Your Party")
     label(f, "GameFontHighlightSmall",
         "Choose stars for each player. Click a player to show their tags in the panel on the right (up to three). Leave a player unrated to skip them.",
         66, -40, 1090)
@@ -1878,7 +1878,7 @@ function A:CreatePartyReviewWindow()
         f.scroll:HookScript("OnVerticalScroll", function() A:PositionPartyTagBridge() end)
     end
 
-    f.save = button(f, "Save Ratings", 155, 27, 860, -562, function()
+    f.save = button(f, "Save Ratings", 155, 27, 860, -586, function()
         if f.testMode then
             f.status:SetText("|cffffd100TEST WINDOW|r - nothing is saved or shared.")
             return
@@ -1911,7 +1911,7 @@ function A:CreatePartyReviewWindow()
             A:Log(string.format("Saved %d party rating%s.", saved, saved == 1 and "" or "s"))
         end
     end)
-    button(f, "Not Now", 135, 27, 1029, -562, function() f:Hide() end)
+    button(f, "Not Now", 135, 27, 1029, -586, function() f:Hide() end)
     -- Loading screens close every Escape-closable window; the time lets the
     -- party popup tell that apart from the player closing it.
     f:HookScript("OnHide", function(self) self.hiddenAt = GetTime and GetTime() end)

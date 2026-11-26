@@ -20,6 +20,7 @@ local registry = {
     [13]={name="Shares Resources",positive=true},
     [14]={name="Responsive",positive=true},
     [15]={name="Careful Pulls",positive=true},
+    [16]={name="Friendly",positive=true},
     [33]={name="Ninja Looter",positive=false},
     [34]={name="Toxic",positive=false},
     [35]={name="Griefer",positive=false,retired=true},
@@ -37,13 +38,15 @@ local registry = {
     [47]={name="Elitist",positive=false},
     [48]={name="Underperforms",positive=false},
     [49]={name="Impatient",positive=false},
+    [50]={name="Unfriendly",positive=false},
 }
 -- Each positive tag and its negative opposite can't be chosen together.
 -- Retired tags keep their old conflicts for reviews that still carry them.
 local opposite = {[1]={[46]=true},[2]={[38]=true},[3]={[47]=true},[4]={[48]=true},
     [5]={[37]=true},[6]={[49]=true},[7]={[33]=true,[44]=true},[8]={[42]=true},
     [9]={[41]=true},[10]={[39]=true},[11]={[43]=true},[12]={[34]=true,[35]=true},
-    [13]={[45]=true},[14]={[36]=true},[15]={[40]=true}}
+    [13]={[45]=true},[14]={[36]=true},[15]={[40]=true},
+    [16]={[50]=true}}
 -- One safe ASCII byte per ID. Preserve this alphabet and ID-to-byte mapping.
 local alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 A.TAG_REGISTRY = registry
