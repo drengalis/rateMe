@@ -24,7 +24,9 @@ Open the rating window in any of these ways:
 - Target the player and type `/rateme target`.
 - Click the player in **My Ratings** in the main window.
 
-Choose 1–5 stars, then pick up to three tags from the Positive and Negative lists. The most commonly used tags are listed first. Some tags can't be combined because they contradict each other, for example **+Fair Looter** and **-Ninja Looter**. Click **Save Rating** when you're done.
+The window shows the player's name, with their class icon and class underneath, and their community rating, which fills in as replies come back from other Rate Me! users.
+
+Choose 1–5 stars, then pick up to three tags from the Positive and Negative lists. Each positive tag is shown beside its opposite, for example **+Fair Looter** next to **-Ninja Looter**, and you can't choose both. The most commonly used pairs are listed first. Tags you've chosen turn yellow with a check mark, and tags you can't choose right now are faded. Click **Save Rating** when you're done.
 
 To change a rating, open the window again. **Remove** deletes your rating. By default you're asked to confirm first, and you can tick "Don't ask again" in that box to skip the question.
 
@@ -32,19 +34,23 @@ To change a rating, open the window again. **Remove** deletes your rating. By de
 
 | Positive | Negative |
 |---|---|
-| +Leader | -Ninja Looter |
-| +Team Player | -Toxic |
-| +Helpful | -Griefer |
-| +Skilled | -Frequently AFK |
+| +Leader | -Poor Leadership |
+| +Team Player | -Uncooperative |
+| +Helpful | -Elitist |
+| +Skilled | -Underperforms |
 | +Reliable | -Abandons Groups |
-| +Patient | -Uncooperative |
-| +Fair Looter | -Ignores Mechanics |
-| +Good Communicator | -Reckless Pulls |
+| +Patient | -Impatient |
+| +Fair Looter | -Ninja Looter |
+| +Good Communicator | -Poor Communication |
 | +Well Prepared | -Unprepared |
-| +Knows Mechanics | -Poor Communication |
-| +Protects Teammates | -Breaks Crowd Control |
-| +Good Sportsmanship | -Disrespects Loot Rules |
+| +Knows Mechanics | -Ignores Mechanics |
+| +Uses Crowd Control | -Ignores Crowd Control |
+| +Good Sportsmanship | -Toxic |
 | +Shares Resources | -Resource Hog |
+| +Responsive | -Frequently AFK |
+| +Careful Pulls | -Reckless Pulls |
+
+Reviews written with older versions may still show **-Griefer** or **-Disrespects Loot Rules**. These tags can no longer be chosen.
 
 ## Rating your party
 
@@ -71,11 +77,14 @@ Verified means the review came from that character. It doesn't mean the review i
 
 ## The main window
 
-Type `/rateme` or click the star on your minimap. The window has three tabs:
+Type `/rateme` or click the star on your minimap. The window has four tabs:
 
 - **My Ratings:** every player you've rated, with search. Click a player to change your rating.
 - **Recent Lookups:** players you recently looked up or rated. Click a player to see their Community Reviews.
+- **Recent Players:** the last 150 players you've grouped with, in a party or raid, with your rating of each. Players in your current group are listed first as "In your group". Click a player to rate them. The list is kept between sessions.
 - **Settings:** see below.
+
+Each player has a round class icon beside their name. Hover over it to see the class. Rating numbers are coloured from red (1) through yellow (3) to green (5).
 
 All Rate Me! windows can be moved and resized, and they remember their position and size.
 
